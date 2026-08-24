@@ -1,0 +1,130 @@
+= Issue 0024: On-demand Reservierung anlegen und Verfall (UC-09)
+
+:issue-id: 0024
+:type: Story
+:status: closed
+:priority: Must
+:refs: UC-09, BR-029, BR-030, BR-031, BR-032, BR-033, BR-034, BR-035, BR-036
+:epic: 0021
+
+== Beschreibung
+
+Als System möchte ich Reservierungen on-demand anlegen und verfallene Reservierungen on-demand bereinigen,
+damit keine Hintergrundprozesse oder Cron-Jobs notwendig sind und das Verhalten in Tests deterministisch
+reproduzierbar bleibt.
+
+=== Technischer Kontext
+
+Architekturentscheidung (ADR-003): Reservierungsanlage und -verfall erfolgen _ausschließlich on-demand_,
+nie über einen Background-Job.
+Die `DateSource`-Abstraktion (Issue 0004) ermöglicht deterministische Tests durch Einspeisung eines
+festen Datums (`FixedDateSource`).
+
+Der `VormerkungService` erhält zwei interne Methoden:
+
+==== 1. `reservierungAnlegen(gegenstandId)`
+
+Wird aufgerufen von:
+
+* `PruefungService` (UC-04), nachdem ein Gegenstand als _verfügbar_ eingestuft wurde.
+* `WartungService` (UC-05), nachdem Wartungsarbeiten abgeschlossen sind.
+
+Ablauf:
+
+1. Bestimme die Kategorie des Gegenstands.
+2. Hole die Vormerkungen dieser Kategorie in FIFO-Reihenfolge (Eingangszeit aufsteigend, BR-028).
+3. Iteriere durch die Queue:
+   a. Ist das erste Mitglied gesperrt (BR-033, BR-034/035)?
+      → Überspringen; das Mitglied behält seinen Platz in der Queue.
+   b. Erstes nicht-gesperrtes Mitglied gefunden → Reservierung anlegen, GegenstandStatus = RESERVIERT, Abbruch.
+   c. Queue leer oder alle Mitglieder gesperrt → GegenstandStatus bleibt / wird VERFUEGBAR (keine Aktion nötig).
+4. Ist der Gegenstand nach Prüfung wartungsfällig (BR-032)?
+   → Keine Reservierung anlegen; Warteschlange bleibt unverändert.
+
+Mehrere Gegenstände derselben Kategorie werden gleichzeitig verfügbar (BR-030):
+Jeder Gegenstand löst einen eigenen Aufruf von `reservierungAnlegen` aus und bedient das jeweils
+nächste Mitglied in der Queue unabhängig voneinander.
+
+==== 2. `verfalleneReservierungenBereinigen(kategorieId?)`
+
+Wird aufgerufen _bevor_:
+
+* `POST /ausleihen` eine Ausleihe startet.
+* `POST /vormerkungen` eine neue Vormerkung anlegt.
+
+Ablauf:
+
+1. Lade alle aktiven Reservierungen (ggf. gefiltert nach `kategorieId`).
+2. Für jede Reservierung: Ist `entstehungsDatum + 3 Kalendertage < heute` (BR-031)?
+   → Reservierung als verfallen markieren.
+   → GegenstandStatus = VERFUEGBAR (temporär).
+   → `reservierungAnlegen(gegenstandId)` aufrufen — kaskadierend, bis eine gültige Reservierung
+      angelegt wurde oder die Queue erschöpft ist.
+3. Nicht abgelaufene Reservierungen bleiben unberührt.
+
+Sperre eines Mitglieds (BR-034/035): on-demand berechnet als `offene Ausleihe mit rueckgabeFrist < heute`.
+Die Sperre endet automatisch, sobald alle überfälligen Ausleihen abgeschlossen sind (BR-036).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: On-demand Reservierung anlegen und Verfall
+
+  Scenario: Gegenstand nach Prüfung verfügbar — offene Vormerkung vorhanden
+    Given ein Gegenstand G001 der Kategorie K001 wird nach einer Prüfung als VERFUEGBAR eingestuft
+    And Mitglied M001 hat eine Vormerkung für K001 (älteste Eingangszeit)
+    And M001 ist nicht gesperrt
+    When PruefungService ruft reservierungAnlegen("G001") auf
+    Then ist GegenstandStatus von G001 RESERVIERT
+    And die Reservierung ist M001 zugeordnet
+
+  Scenario: Gegenstand nach Prüfung wartungsfällig — keine Reservierung
+    Given ein Gegenstand G001 der Kategorie K001 wird nach einer Prüfung als WARTUNGSFAELLIG eingestuft
+    And Mitglied M001 hat eine Vormerkung für K001
+    When PruefungService signalisiert WARTUNGSFAELLIG für G001
+    Then wird keine Reservierung angelegt (BR-032)
+    And die Vormerkung von M001 bleibt in der Queue
+
+  Scenario: Reservierung älter als 3 Tage verfällt on-demand
+    Given eine Reservierung für Gegenstand G001 / Mitglied M001 wurde vor 4 Tagen angelegt
+    And FixedDateSource liefert "heute" = entstehungsDatum + 4 Tage
+    And kein weiteres Mitglied hat eine Vormerkung für K001
+    When POST /ausleihen oder POST /vormerkungen ausgelöst wird
+    Then ruft der Service verfalleneReservierungenBereinigen auf
+    And die Reservierung von M001 ist verfallen
+    And GegenstandStatus von G001 ist VERFUEGBAR
+
+  Scenario: Reservierung verfällt — nächstes Mitglied erbt
+    Given eine Reservierung für G001 / M001 ist abgelaufen (>3 Tage)
+    And Mitglied M002 steht als nächstes in der Warteschlange für K001
+    And M002 ist nicht gesperrt
+    When verfalleneReservierungenBereinigen aufgerufen wird
+    Then erhält M002 eine neue Reservierung für G001
+    And GegenstandStatus von G001 ist RESERVIERT (für M002)
+
+  Scenario: Gesperrtes Mitglied in Queue wird übersprungen
+    Given Mitglied M001 steht an erster Stelle der Queue für K001
+    And M001 ist gesperrt (hat überfällige Ausleihe, BR-034)
+    And Mitglied M002 steht an zweiter Stelle der Queue
+    And M002 ist nicht gesperrt
+    When reservierungAnlegen für einen verfügbaren Gegenstand der Kategorie K001 aufgerufen wird
+    Then wird M001 übersprungen
+    And M002 erhält die Reservierung
+    And M001 behält seinen Platz in der Queue (BR-033)
+
+  Scenario: Zwei Gegenstände gleichzeitig verfügbar — zwei Reservierungen für zwei Mitglieder
+    Given Mitglied M001 steht an erster Stelle der Queue für K001
+    And Mitglied M002 steht an zweiter Stelle der Queue für K001
+    And Gegenstände G001 und G002 der Kategorie K001 werden gleichzeitig verfügbar (BR-030)
+    When reservierungAnlegen("G001") und reservierungAnlegen("G002") nacheinander aufgerufen werden
+    Then erhält M001 eine Reservierung für G001
+    And erhält M002 eine Reservierung für G002
+    And keine weiteren Vormerkungen für K001 verbleiben in der Queue
+----
+
+== Abhängigkeiten
+
+* 0021 (EPIC: Vormerkung und Reservierung)
+* 0022 (Vormerken — Aufbau der FIFO-Queue)
+* 0004 (DateSource-Abstraktion für deterministische Tests)

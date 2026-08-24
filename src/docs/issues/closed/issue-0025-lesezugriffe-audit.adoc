@@ -1,0 +1,53 @@
+= Issue 0025: Lesezugriffe und Audit-Log
+
+:issue-id: 0025
+:type: EPIC
+:status: closed
+:priority: Must
+:refs: UC-10
+
+== Beschreibung
+
+Dieses EPIC fasst alle Read-only-Endpunkte für Thekendienst und Wart zusammen sowie das Audit-Log, das Kautionsbewegungen und Zustandswechsel von Gegenständen nachvollziehbar macht.
+
+Thekendienst und Wart benötigen einen konsistenten Überblick über laufende Ausleihen, abgeschlossene Prüfprotokolle und historische Kautionsbewegungen. Das Audit-Log stellt sicher, dass jede sicherheitsrelevante Aktion (Hinterlegung, Abzug, Freigabe von Kautionen sowie Statuswechsel von Gegenständen) dauerhaft und unveränderlich protokolliert wird.
+
+Umfang der Stories dieses EPICs:
+
+- *0026* — Ausleihen abfragen (`GET /ausleihen`, `GET /ausleihen/:id`)
+- *0027* — Prüfprotokolle abfragen (`GET /pruefungen`, `GET /pruefungen/:id`)
+- *0028* — Audit-Log und Kautionsbewegungen (`GET /audit`, `GET /ausleihen/{id}/kautionsbewegungen`)
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Lesezugriffe und Audit-Log
+
+  Scenario: Thekendienst erhält Überblick über laufende Ausleihen
+    Given der Benutzer ist als Thekendienst authentifiziert
+    When er GET /ausleihen aufruft
+    Then erhält er eine Liste aller Ausleihen mit Status 200
+
+  Scenario: Wart erhält Überblick über Prüfprotokolle
+    Given der Benutzer ist als Wart authentifiziert
+    When er GET /pruefungen aufruft
+    Then erhält er eine Liste aller Prüfprotokolle mit Status 200
+
+  Scenario: Wart ruft das Audit-Log ab
+    Given der Benutzer ist als Wart authentifiziert
+    When er GET /audit aufruft
+    Then erhält er alle Audit-Einträge (KautionsbewegungEintrag und ZustandswechselEintrag) chronologisch
+
+  Scenario: Mitglied hat keinen Zugriff auf Lesezugriff-Endpunkte
+    Given der Benutzer ist als Mitglied authentifiziert
+    When er einen der geschützten GET-Endpunkte aufruft
+    Then erhält er den Status 403
+----
+
+== Abhängigkeiten
+
+- 0001 (Projektskelett)
+- 0007 (Stammdaten)
+- 0013 (Ausleihbetrieb)
+- 0017 (Prüfung, Wartung und Einweisung)

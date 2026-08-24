@@ -1,0 +1,57 @@
+= Issue 0001: NestJS + Drizzle Projektskelett
+
+:issue-id: 0001
+:type: EPIC
+:status: closed
+:priority: Must
+:refs: UC-08, UC-09
+
+== Beschreibung
+
+Das Leihgut-System braucht ein lauffähiges Walking Skeleton, das alle Architekturschichten end-to-end verbindet — REST-API, CLI, Domäneschicht und SQLite-Datenbank — bevor fachlicher Mehrwert aufgebaut werden kann.
+Das Skeleton liefert selbst keinen fachlichen Wert, schafft aber die Grundstruktur, auf der alle weiteren Epics und Stories zuverlässig aufbauen können.
+Es entspricht dem Konzept des „Tracer Bullet": jede Schicht ist vorhanden und verdrahtet, aber noch nahezu leer.
+
+Technisch besteht das Skeleton aus einem NestJS-Monorepo mit Express-Adapter, Drizzle ORM über better-sqlite3, dem CLI-Framework nestjs-commander, Jest als Test-Runner und TypeScript im Strict Mode.
+Die folgenden Stories konkretisieren einzelne Bestandteile des Skeletons:
+
+- **0002** — NestJS-Bootstrap + Health-Endpunkt
+- **0003** — Drizzle-Schema + SQLite-Migration
+- **0004** — DateSource-Interface + Implementierungen
+- **0005** — X-Rolle-Header Middleware
+- **0006** — Globaler ErrorFilter + Fehlerklassen
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Walking Skeleton des Leihgut-Systems
+
+  Scenario: Health-Endpunkt ist erreichbar
+    Given der Server wurde mit `npm run start:dev` gestartet
+    When ein HTTP-GET auf `/health` abgesetzt wird
+    Then antwortet der Server mit HTTP 200
+    And der Response-Body enthält `{"status":"ok"}`
+
+  Scenario: CLI-Befehl startet ohne Fehler
+    Given die Applikation wurde gebaut (`npm run build`)
+    When der CLI-Einstiegspunkt ohne Argumente ausgeführt wird
+    Then endet der Prozess mit Exit-Code 0
+    And es wird keine unbehandelte Exception ausgegeben
+
+  Scenario: Datenbankdatei wird beim ersten Start angelegt
+    Given keine SQLite-Datei existiert im konfigurierten Pfad
+    When der Server mit `npm run start:dev` gestartet wird
+    Then wird die SQLite-Datei am konfigurierten Pfad erzeugt
+    And alle definierten Tabellen sind in der Datei vorhanden
+
+  Scenario: Zweiter Start ist idempotent
+    Given die SQLite-Datei und alle Tabellen existieren bereits
+    When der Server erneut mit `npm run start:dev` gestartet wird
+    Then bricht der Start nicht mit einem Fehler ab
+    And die vorhandenen Daten bleiben erhalten
+----
+
+== Abhängigkeiten
+
+_Keine — dieses Epic ist der Ausgangspunkt aller weiteren Arbeiten._

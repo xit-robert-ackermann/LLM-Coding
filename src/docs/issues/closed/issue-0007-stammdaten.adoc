@@ -1,0 +1,55 @@
+= Issue 0007: Stammdatenverwaltung
+
+:issue-id: 0007
+:type: EPIC
+:status: closed
+:priority: Must
+:refs: UC-08
+
+== Beschreibung
+
+Dieses EPIC umfasst die vollständige Verwaltung des Gegenstandskatalogs (Kategorien und Gegenstände) sowie des Mitgliederstamms.
+Die Stammdaten bilden die fachliche Datenbasis für alle weiteren Use Cases — insbesondere für Ausleihe, Rückgabe und Wartung.
+
+Ohne gepflegte Kategorien können keine Gegenstände angelegt werden.
+Ohne Gegenstände gibt es nichts auszuleihen.
+Ohne Mitglieder gibt es keine Ausleihvorgänge.
+
+Die Stories dieses EPICs implementieren die REST-Endpunkte zur Anlage und Abfrage von Kategorien, Gegenständen und Mitgliedern gemäß UC-08.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Stammdatenverwaltung
+
+  Scenario: Eine neue Kategorie anlegen und im System abrufen
+    Given das System enthält keine Kategorien
+    When der Thekendienst POST /kategorien mit gültigen Daten aufruft
+    Then antwortet das System mit 201
+    And die neue Kategorie ist über GET /kategorien abrufbar
+
+  Scenario: Einen Gegenstand anlegen und Kaution berechnen
+    Given eine Kategorie "Werkzeug" existiert im System
+    When der Thekendienst POST /gegenstaende mit wiederbeschaffungswert 80 aufruft
+    Then antwortet das System mit 201
+    And das zurückgegebene Objekt enthält kaution: 16
+
+  Scenario: Ein Mitglied anlegen und abfragen
+    Given das System enthält kein Mitglied mit dem Namen "Sabine"
+    When der Thekendienst POST /mitglieder mit name "Sabine" aufruft
+    Then antwortet das System mit 201
+    And GET /mitglieder/:id liefert name "Sabine" zurück
+----
+
+== Stories
+
+- 0008 — Kategorie anlegen
+- 0009 — Gegenstand anlegen
+- 0010 — Gegenstände abfragen
+- 0011 — Mitglied anlegen
+- 0012 — Mitglied abfragen
+
+== Abhängigkeiten
+
+- 0001 (Projektskelett)

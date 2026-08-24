@@ -1,0 +1,73 @@
+= Issue 0012: Mitglied abfragen
+
+:issue-id: 0012
+:type: Story
+:status: closed
+:priority: Must
+:refs: UC-08, BR-005, BR-034, BR-035
+:epic: 0007
+
+== Beschreibung
+
+Als Thekendienst möchte ich ein Mitglied mit seinem aktuellen Sperrstatus abrufen, damit ich vor dem Start einer Ausleihe prüfen kann, ob das Mitglied ausleihberechtigt ist.
+
+*Technischer Kontext:*
+
+`GET /mitglieder/:id` wird vom `MitgliedController.findOne()` verarbeitet.
+Der Controller delegiert an eine Repository-Abfrage, die das Mitglied samt seiner offenen Ausleihen lädt.
+
+Der Sperrstatus wird on-demand berechnet (BR-034, BR-035) und nicht persistiert:
+
+----
+gesperrt = mindestens eine offene Ausleihe existiert,
+           bei der rueckgabeFrist < heute
+           UND der Gegenstand NICHT den Status IN_PRUEFUNG hat
+----
+
+Ein Mitglied, das zwar überfällige Ausleihen hat, deren Gegenstände sich jedoch alle in Prüfung befinden, gilt als *nicht gesperrt*.
+
+Die Berechnung von „heute" erfolgt über `DateSource.today()`, damit Integrationstests deterministisch gegen einen festen Datumswert laufen können (BR-034/035).
+
+Ist die angefragte Mitglieds-ID unbekannt, antwortet das System mit HTTP 404 und Fehlercode `MITGLIED_NICHT_GEFUNDEN`.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Mitglied abfragen
+
+  Scenario: Mitglied ohne Sperranlass abrufen
+    Given ein Mitglied mit id "m-1" existiert im System
+    And das Mitglied hat keine überfälligen offenen Ausleihen
+    When der Thekendienst GET /mitglieder/m-1 aufruft
+    Then antwortet das System mit HTTP 200
+    And die Antwort enthält gesperrt: false
+
+  Scenario: Mitglied mit überfälliger Ausleihe ist gesperrt
+    Given ein Mitglied mit id "m-2" existiert im System
+    And das Mitglied hat eine offene Ausleihe, deren rueckgabeFrist in der Vergangenheit liegt
+    And der zugehörige Gegenstand hat nicht den Status IN_PRUEFUNG
+    When der Thekendienst GET /mitglieder/m-2 aufruft
+    Then antwortet das System mit HTTP 200
+    And die Antwort enthält gesperrt: true
+
+  Scenario: Überfällige Ausleihe mit Gegenstand IN_PRUEFUNG sperrt nicht
+    Given ein Mitglied mit id "m-3" existiert im System
+    And das Mitglied hat eine offene Ausleihe, deren rueckgabeFrist in der Vergangenheit liegt
+    And der zugehörige Gegenstand hat den Status IN_PRUEFUNG
+    When der Thekendienst GET /mitglieder/m-3 aufruft
+    Then antwortet das System mit HTTP 200
+    And die Antwort enthält gesperrt: false
+
+  Scenario: Unbekannte Mitglieds-ID
+    Given kein Mitglied mit id "m-99" existiert im System
+    When der Thekendienst GET /mitglieder/m-99 aufruft
+    Then antwortet das System mit HTTP 404
+    And der Fehlercode lautet "MITGLIED_NICHT_GEFUNDEN"
+----
+
+== Abhängigkeiten
+
+- 0004 (DateSource-Interface + Implementierungen)
+- 0007 (EPIC Stammdatenverwaltung)
+- 0011 (Mitglied anlegen)

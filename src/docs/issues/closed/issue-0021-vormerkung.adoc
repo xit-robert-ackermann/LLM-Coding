@@ -1,0 +1,51 @@
+= Issue 0021: Vormerkung und Reservierung
+
+:issue-id: 0021
+:type: EPIC
+:status: closed
+:priority: Must
+:refs: UC-07, UC-09
+
+== Beschreibung
+
+Mitglieder können Gegenstände einer Kategorie vormerken, wenn kein geeignetes Exemplar sofort verfügbar ist.
+Sobald ein Gegenstand der betreffenden Kategorie nach einer Prüfung als verfügbar eingestuft wird, löst das System _on-demand_ eine Reservierung für das erste Mitglied der Warteschlange aus.
+Die Warteschlange wird streng nach Eingangszeit (FIFO) verwaltet.
+
+Reservierungen sind zeitlich begrenzt: Sie verfallen nach 3 Kalendertagen, wenn das Mitglied den Gegenstand nicht abgeholt hat.
+Sowohl der Verfall als auch die Neuanlage von Reservierungen erfolgen _ohne_ Hintergrundprozesse — ausschließlich on-demand, unmittelbar vor einer Ausleihe oder Vormerkung.
+
+Gesperrte Mitglieder dürfen sich vormerken lassen, dürfen den reservierten Gegenstand jedoch nicht abholen.
+Wird ein gesperrtes Mitglied an der Spitze der Queue angetroffen, wird es übersprungen; es behält jedoch seinen Platz in der Warteschlange.
+
+Dieses EPIC umfasst die folgenden User Stories:
+
+* Issue 0022 — Vormerken (POST /vormerkungen)
+* Issue 0023 — Vormerkung stornieren (DELETE /vormerkungen/:id)
+* Issue 0024 — On-demand Reservierung anlegen und Verfall (UC-09)
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Vormerkung und Reservierung (EPIC-Überblick)
+
+  Scenario: Mitglied merkt Kategorie vor und erhält Reservierung nach Rückgabe
+    Given ein Mitglied ist registriert und nicht gesperrt
+    And alle Gegenstände der Kategorie sind ausgeliehen
+    When das Mitglied POST /vormerkungen aufruft
+    Then wird eine Vormerkung mit Eingangszeit angelegt
+    And wenn ein Gegenstand der Kategorie nach einer Prüfung verfügbar wird
+    Then wird on-demand eine Reservierung für dieses Mitglied angelegt
+
+  Scenario: Reservierung verfällt nach 3 Tagen
+    Given eine Reservierung wurde vor mehr als 3 Kalendertagen angelegt
+    When eine neue Ausleihe oder Vormerkung ausgelöst wird
+    Then verfällt die abgelaufene Reservierung on-demand
+    And der Gegenstand wird entweder dem nächsten Mitglied reserviert oder auf VERFUEGBAR gesetzt
+----
+
+== Abhängigkeiten
+
+* 0001 (Projektskelett)
+* 0007 (Stammdaten — Kategorien, Mitglieder, Gegenstände)

@@ -1,0 +1,70 @@
+= Issue 0010: Gegenstände abfragen
+
+:issue-id: 0010
+:type: Story
+:status: closed
+:priority: Must
+:refs: UC-08, UC-10, BR-001
+:epic: 0007
+
+== Beschreibung
+
+Als Mitglied oder Thekendienst möchte ich Gegenstände nach Kategorie und Status filtern können, damit ich schnell die Verfügbarkeit eines gewünschten Gegenstands prüfen und den richtigen Gegenstand für eine Ausleihe auswählen kann.
+
+*Technischer Kontext:*
+
+Zwei Endpunkte werden implementiert:
+
+`GET /gegenstaende?kategorieId=&status=` — liefert eine (möglicherweise gefilterte) Liste aller Gegenstände.
+Beide Query-Parameter sind optional.
+Werden sie kombiniert, werden beide Bedingungen als UND-Verknüpfung ausgewertet.
+
+`GET /gegenstaende/{inventarnummer}` — liefert einen einzelnen Gegenstand anhand seiner Inventarnummer (fachlicher Schlüssel).
+Der Pfadparameter ist die Inventarnummer (fachlicher Schlüssel), nicht eine interne Datenbank-ID.
+Ist die Inventarnummer unbekannt, antwortet das System mit HTTP 404.
+
+Die Antwort enthält die Gegenstandsdaten inkl. berechneter Kaution und aktuellem Status.
+Mitgliedsbezogene Sperrinformationen werden in dieser Story *nicht* ermittelt — das ist Aufgabe von Issue 0012.
+
+Beide Endpunkte sind ohne Rolleneinschränkung erreichbar (alle authentifizierten Nutzer).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Gegenstände abfragen
+
+  Scenario: Alle Gegenstände ohne Filter abrufen
+    Given drei Gegenstände sind im System gespeichert
+    When ein Nutzer GET /gegenstaende aufruft ohne Query-Parameter
+    Then antwortet das System mit HTTP 200
+    And die Antwort enthält alle drei Gegenstände
+
+  Scenario: Gegenstände nach Status filtern
+    Given zwei Gegenstände mit status "VERFUEGBAR" und einer mit status "AUSGELIEHEN" existieren
+    When ein Nutzer GET /gegenstaende?status=VERFUEGBAR aufruft
+    Then antwortet das System mit HTTP 200
+    And die Antwort enthält nur die zwei verfügbaren Gegenstände
+
+  Scenario: Gegenstände nach Kategorie filtern
+    Given Gegenstände aus Kategorie "kat-1" und "kat-2" existieren
+    When ein Nutzer GET /gegenstaende?kategorieId=kat-1 aufruft
+    Then antwortet das System mit HTTP 200
+    And die Antwort enthält nur Gegenstände der Kategorie "kat-1"
+
+  Scenario: Einzelnen Gegenstand abrufen
+    Given ein Gegenstand mit inventarnummer "INV-042" existiert im System
+    When ein Nutzer GET /gegenstaende/INV-042 aufruft
+    Then antwortet das System mit HTTP 200
+    And die Antwort enthält den Gegenstand mit inventarnummer "INV-042"
+
+  Scenario: Unbekannte Inventarnummer
+    Given kein Gegenstand mit inventarnummer "INV-099" existiert im System
+    When ein Nutzer GET /gegenstaende/INV-099 aufruft
+    Then antwortet das System mit HTTP 404
+----
+
+== Abhängigkeiten
+
+- 0007 (EPIC Stammdatenverwaltung)
+- 0009 (Gegenstand anlegen)

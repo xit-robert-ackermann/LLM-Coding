@@ -1,0 +1,60 @@
+= Issue 0005: X-Rolle-Header Middleware
+
+:issue-id: 0005
+:type: Story
+:status: closed
+:priority: Must
+:refs: BR-039, BR-040, BR-041, BR-042
+:epic: 0001
+
+== Beschreibung
+
+Als Thekendienst oder Mitglied möchte ich meine Rolle per `X-Rolle`-Header in jedem Request angeben, damit das System meine Berechtigungen erkennt und Endpunkte rollenbasiert schützt.
+
+Technisch liest eine NestJS-Middleware den Header `X-Rolle` aus jedem eingehenden Request.
+Fehlt der Header oder enthält er einen unbekannten Wert, wird der Request mit HTTP 401 abgebrochen.
+Gültige Werte sind `mitglied`, `thekendienst` und `wart`; die gelesene Rolle wird als Attribut auf dem Request-Objekt gespeichert.
+Ein `@RequireRole(...roles)`-Decorator markiert Controller-Methoden; ein zugehöriger NestJS-Guard prüft, ob die Rolle des Aufrufers in der erlaubten Menge enthalten ist — andernfalls wird HTTP 403 zurückgegeben.
+Middleware und Guard sind reine Operationen (IOSP): sie lesen, prüfen und delegieren, enthalten aber keine Domänenlogik.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: X-Rolle-Header Middleware und Rollen-Guard
+
+  Scenario: Request ohne X-Rolle-Header wird abgelehnt
+    Given der Server läuft
+    When ein HTTP-GET auf einen beliebigen Endpunkt ohne `X-Rolle`-Header gesendet wird
+    Then antwortet der Server mit HTTP 401
+    And der Response-Body enthält einen Hinweis auf den fehlenden Header
+
+  Scenario: Request mit unbekanntem Rollenwert wird abgelehnt
+    Given der Server läuft
+    When ein HTTP-GET mit `X-Rolle: superadmin` gesendet wird
+    Then antwortet der Server mit HTTP 401
+    And der Response-Body enthält einen Hinweis auf den ungültigen Rollenwert
+
+  Scenario: Mitglied ruft mitglied-erlaubten Endpunkt auf
+    Given der Server läuft
+    And der Endpunkt ist mit `@RequireRole('mitglied')` markiert
+    When ein HTTP-Request mit `X-Rolle: mitglied` gesendet wird
+    Then antwortet der Server mit HTTP 200 oder 201
+
+  Scenario: Mitglied ruft thekendienst-exklusiven Endpunkt auf
+    Given der Server läuft
+    And der Endpunkt ist mit `@RequireRole('thekendienst')` markiert
+    When ein HTTP-Request mit `X-Rolle: mitglied` gesendet wird
+    Then antwortet der Server mit HTTP 403
+    And der Response-Body enthält einen Hinweis auf fehlende Berechtigung
+
+  Scenario: Thekendienst darf alle für Mitglieder erlaubten Endpunkte nutzen
+    Given der Server läuft
+    And der Endpunkt ist mit `@RequireRole('mitglied', 'thekendienst')` markiert
+    When ein HTTP-Request mit `X-Rolle: thekendienst` gesendet wird
+    Then antwortet der Server mit HTTP 200 oder 201
+----
+
+== Abhängigkeiten
+
+- 0002 (NestJS-Bootstrap + Health-Endpunkt)

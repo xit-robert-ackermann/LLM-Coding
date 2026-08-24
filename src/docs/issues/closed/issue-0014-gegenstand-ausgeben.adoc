@@ -1,0 +1,91 @@
+= Issue 0014: Gegenstand ausgeben
+
+:issue-id: 0014
+:type: Story
+:status: closed
+:priority: Must
+:refs: UC-01, BR-007, BR-008, BR-009, BR-010, BR-011, BR-020, BR-022
+:epic: 0013
+
+== Beschreibung
+
+Als Thekendienst möchte ich einem Mitglied einen Gegenstand ausgeben,
+damit das Mitglied ihn leihen kann und die Kaution korrekt hinterlegt wird.
+
+*Technischer Kontext:*
+Der Endpunkt `POST /ausleihen` wird durch `AusleiheController.create()` bedient.
+Die Geschäftslogik liegt in `AusleiheService.ausgeben()` und prüft die Vorbedingungen
+in folgender Reihenfolge:
+
+. Mitglied ist nicht gesperrt (BR-009).
+   Eine Sperre liegt vor, wenn das Mitglied mindestens eine überfällige, noch offene Ausleihe besitzt
+   (`rueckgabeFrist < heute` und Gegenstand nicht in Prüfung, vgl. BR-034/035).
+   Die Rückgabefristberechnung (`ausgabeDatum + leihdauer`) und die Sperr-Prüfung nutzen `DateSource.today()`.
+. Aktive Ausleihen des Mitglieds sind weniger als 3 (BR-008).
+. Gegenstand ist verfügbar *oder* für genau dieses Mitglied reserviert (BR-007).
+. Falls der Gegenstand einweisungspflichtig ist, muss eine dokumentierte Einweisung für das Mitglied vorliegen (BR-010).
+
+Bei erfolgreicher Prüfung:
+
+* Ausleihe wird mit Status `OFFEN` angelegt.
+* Rückgabefrist = Ausgabedatum + konfigurierte Leihdauer der Gegenstandskategorie (BR-011).
+* Kautionsbetrag wird als hinterlegt verbucht (BR-020).
+* Ein Audit-Eintrag mit Zeitstempel, Betrag und Auslöser `AUSGABE` wird geschrieben (BR-022).
+* GegenstandStatus wechselt auf `AUSGELIEHEN`.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Gegenstand ausgeben
+
+  Scenario: Erfolgreiche Ausgabe
+    Given ein Gegenstand im Status VERFUEGBAR
+    And ein Mitglied ohne aktive Sperren und mit weniger als 3 laufenden Ausleihen
+    When der Thekendienst POST /ausleihen mit gegenstandId und mitgliedId aufruft
+    Then antwortet der Server mit 201
+    And der Gegenstand hat den Status AUSGELIEHEN
+    And die Ausleihe hat den Status OFFEN mit gesetzter Rückgabefrist
+    And ein Audit-Eintrag für die Kautionshinterlegung ist vorhanden
+
+  Scenario: Ausgabe an Mitglied mit Reservierung
+    Given ein Gegenstand im Status RESERVIERT für Mitglied A
+    And Mitglied A ist nicht gesperrt und hat weniger als 3 Ausleihen
+    When der Thekendienst POST /ausleihen für Mitglied A aufruft
+    Then antwortet der Server mit 201
+    And die Ausleihe wird angelegt (BR-007 Ausnahme greift)
+
+  Scenario: Gegenstand nicht verfügbar
+    Given ein Gegenstand im Status AUSGELIEHEN
+    When der Thekendienst POST /ausleihen aufruft
+    Then antwortet der Server mit 409
+    And der Fehlercode ist GEGENSTAND_NICHT_VERFUEGBAR
+
+  Scenario: Mitglied gesperrt
+    Given ein Mitglied mit mindestens einer überfälligen offenen Ausleihe
+    And ein verfügbarer Gegenstand
+    When der Thekendienst POST /ausleihen aufruft
+    Then antwortet der Server mit 409
+    And der Fehlercode ist MITGLIED_GESPERRT
+
+  Scenario: Ausleihlimit erreicht
+    Given ein Mitglied mit bereits 3 aktiven Ausleihen
+    And ein verfügbarer Gegenstand
+    When der Thekendienst POST /ausleihen aufruft
+    Then antwortet der Server mit 409
+    And der Fehlercode ist MAX_AUSLEIHEN_ERREICHT
+
+  Scenario: Einweisung fehlt
+    Given ein einweisungspflichtiger Gegenstand im Status VERFUEGBAR
+    And ein Mitglied ohne dokumentierte Einweisung für diesen Gegenstandstyp
+    When der Thekendienst POST /ausleihen aufruft
+    Then antwortet der Server mit 409
+    And der Fehlercode ist EINWEISUNG_FEHLT
+----
+
+== Abhängigkeiten
+
+* 0013 – EPIC Ausleihbetrieb
+* 0004 – DateSource-Interface + Implementierungen
+* 0005 – Rollen-Middleware (Absicherung auf Rolle `thekendienst`)
+* 0006 – ErrorFilter (einheitliche Fehlerantworten)

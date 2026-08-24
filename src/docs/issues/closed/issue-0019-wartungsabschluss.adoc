@@ -1,0 +1,68 @@
+= Issue 0019: Wartungsabschluss
+
+:issue-id: 0019
+:type: Story
+:status: closed
+:priority: Must
+:refs: UC-05, BR-025, BR-026, BR-029
+:epic: 0017
+
+== Beschreibung
+
+Als Wart möchte ich nach erledigter Wartung eines Gegenstands diesen über die CLI wieder als
+verfügbar kennzeichnen, damit er von der Theke erneut ausgeliehen werden kann.
+
+Der CLI-Befehl lautet:
+
+  leihgut warte <inventarnummer>
+
+Solange ein Gegenstand den Status `WARTUNGSFAELLIG` trägt, darf er weder ausgegeben noch
+reserviert werden (BR-026). Erst der explizite Wartungsabschluss durch den Wart hebt diesen
+Zustand auf.
+
+=== Technischer Kontext
+
+Zu implementieren ist `WartungCommand` (nestjs-commander), der `WartungService.wartungAbschliessen()` aufruft.
+
+Der Service führt folgende Schritte in einer Datenbanktransaktion aus:
+
+. Gegenstand laden — Status muss `WARTUNGSFAELLIG` sein, sonst Fehler.
+. GegenstandStatus auf `VERFUEGBAR` setzen (BR-025).
+. Nutzungszähler des Gegenstands auf 0 zurücksetzen (BR-025).
+. Falls offene Vormerkung für die Kategorie dieses Gegenstands vorhanden → `VormerkungService.reservierungAnlegen()` auslösen (BR-029).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Wartungsabschluss
+
+  Scenario: Erfolgreicher Wartungsabschluss
+    Given ein Gegenstand mit Status WARTUNGSFAELLIG
+    When der Wart `leihgut warte <inventarnummer>` ausführt
+    Then wechselt der GegenstandStatus auf VERFUEGBAR
+    And der Nutzungszähler des Gegenstands wird auf 0 zurückgesetzt
+
+  Scenario: Gegenstand ist nicht wartungsfällig
+    Given ein Gegenstand mit Status VERFUEGBAR
+    When der Wart `leihgut warte <inventarnummer>` ausführt
+    Then gibt die CLI einen Fehler aus: "Nur wartungsfällige Gegenstände können gewartet werden"
+    And der Gegenstand bleibt unverändert
+
+  Scenario: Nach Wartungsabschluss mit offener Vormerkung
+    Given ein Gegenstand mit Status WARTUNGSFAELLIG
+    And eine offene Vormerkung für die Kategorie dieses Gegenstands liegt vor
+    When der Wart `leihgut warte <inventarnummer>` ausführt
+    Then wechselt der GegenstandStatus auf VERFUEGBAR
+    And wird automatisch eine Reservierung für das erste wartende Mitglied angelegt
+
+  Scenario: Gegenstand mit Status AUSGELIEHEN kann nicht gewartet werden
+    Given ein Gegenstand mit Status AUSGELIEHEN
+    When der Wart `leihgut warte <inventarnummer>` ausführt
+    Then gibt die CLI einen Fehler aus: "Nur wartungsfällige Gegenstände können gewartet werden"
+----
+
+== Abhängigkeiten
+
+* 0017 — EPIC Prüfung, Wartung und Einweisung
+* 0018 — Prüfprotokoll erfassen (Prüfung setzt Gegenstand auf WARTUNGSFAELLIG, was diesen Befehl erst relevant macht)

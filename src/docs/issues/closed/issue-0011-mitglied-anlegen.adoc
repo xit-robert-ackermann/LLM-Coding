@@ -1,0 +1,66 @@
+= Issue 0011: Mitglied anlegen
+
+:issue-id: 0011
+:type: Story
+:status: closed
+:priority: Must
+:refs: UC-08, BR-005, BR-006
+:epic: 0007
+
+== Beschreibung
+
+Als Thekendienst möchte ich ein neues Mitglied im System anlegen, damit es Gegenstände ausleihen kann und im Ausleihvorgang als Entleiher referenziert werden kann.
+
+*Technischer Kontext:*
+
+Eingehende Anfragen an `POST /mitglieder` werden vom `MitgliedController.create()` entgegengenommen.
+Dieser delegiert an `KatalogService.mitgliedAnlegen()`, das die Validierung durchführt und das Mitglied persistiert.
+
+Der Request-Body enthält ausschließlich das Feld `name` (BR-005).
+Das System vergibt die Mitglieds-ID automatisch (BR-006).
+Eine Deaktivierung von Mitgliedern ist nicht vorgesehen (BR-006).
+
+Validierungsregeln:
+
+- `name` — Pflichtfeld, non-empty String (Leerzeichen-only gilt als leer)
+
+Die Antwort enthält die systemvergebene ID und den übermittelten Namen.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Mitglied anlegen
+
+  Scenario: Mitglied erfolgreich anlegen
+    Given der Thekendienst ist authentifiziert
+    When er POST /mitglieder aufruft mit
+      """
+      { "name": "Sabine" }
+      """
+    Then antwortet das System mit HTTP 201
+    And die Antwort enthält eine systemvergebene id
+    And die Antwort enthält name: "Sabine"
+
+  Scenario: Fehlendes Pflichtfeld name
+    Given der Thekendienst ist authentifiziert
+    When er POST /mitglieder aufruft ohne das Feld "name"
+    Then antwortet das System mit HTTP 400
+    And der Fehlercode lautet "EINGABE_UNGUELTIG"
+
+  Scenario: Leerer String als Name
+    Given der Thekendienst ist authentifiziert
+    When er POST /mitglieder aufruft mit name ""
+    Then antwortet das System mit HTTP 400
+    And der Fehlercode lautet "EINGABE_UNGUELTIG"
+
+  Scenario: Name besteht nur aus Leerzeichen
+    Given der Thekendienst ist authentifiziert
+    When er POST /mitglieder aufruft mit name "   "
+    Then antwortet das System mit HTTP 400
+    And der Fehlercode lautet "EINGABE_UNGUELTIG"
+----
+
+== Abhängigkeiten
+
+- 0007 (EPIC Stammdatenverwaltung)

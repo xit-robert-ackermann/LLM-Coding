@@ -1,0 +1,50 @@
+= Issue 0013: Ausleihbetrieb
+
+:issue-id: 0013
+:type: EPIC
+:status: closed
+:priority: Must
+:refs: UC-01, UC-02, UC-03
+
+== Beschreibung
+
+Dieser EPIC umfasst die Kernfachlichkeit des Systems: den vollständigen Lebenszyklus einer Ausleihe.
+Als Thekendienst möchte ich Gegenstände ausgeben, Ausleihen verlängern und Rückgaben entgegennehmen,
+damit der operative Ausleihbetrieb vollständig digital abgebildet wird.
+
+Der EPIC deckt drei Use Cases ab:
+
+* *UC-01 – Ausgabe:* Ein Mitglied leiht einen Gegenstand aus; Kaution wird hinterlegt und Rückgabefrist gesetzt.
+* *UC-02 – Verlängerung:* Die Rückgabefrist einer laufenden Ausleihe wird einmalig um die volle Leihdauer verlängert.
+* *UC-03 – Rückgabe an der Theke:* Der Gegenstand wird zurückgenommen und zur Prüfung übergeben.
+  Die endgültige Kautionsentscheidung sowie der Abschluss der Ausleihe erfolgen in UC-04 (Prüfung durch den Wart).
+
+Die Stories dieses EPICs bilden die REST-Schnittstellen `POST /ausleihen`,
+`POST /ausleihen/{id}/verlaengern` und `POST /ausleihen/:id/rueckgabe` ab.
+
+== Enthaltene Stories
+
+* 0014 – Gegenstand ausgeben (UC-01)
+* 0015 – Ausleihe verlängern (UC-02)
+* 0016 – Rückgabe entgegennehmen (UC-03)
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Ausleihbetrieb
+
+  Scenario: Vollständiger Ausleihzyklus (happy path)
+    Given ein verfügbarer Gegenstand und ein aktives, nicht gesperrtes Mitglied
+    When der Thekendienst den Gegenstand ausgibt
+    Then ist der Gegenstand im Status AUSGELIEHEN und die Kaution ist hinterlegt
+    When der Thekendienst die Ausleihe verlängert
+    Then ist die neue Rückgabefrist um die volle Leihdauer verschoben
+    When der Thekendienst die Rückgabe entgegennimmt
+    Then ist der Gegenstand im Status IN_PRUEFUNG und die Ausleihe bleibt OFFEN
+----
+
+== Abhängigkeiten
+
+* 0001 – Projektskelett
+* 0007 – Stammdaten

@@ -1,0 +1,53 @@
+= Issue 0032: Vormerkungen abfragen
+
+:issue-id: 0032
+:type: Story
+:status: closed
+:priority: Should
+:refs: UC-10, UC-07, BR-027, BR-028
+:epic: 0025
+
+== Beschreibung
+
+Als Thekendienst möchte ich die aktuelle Warteschlange der Vormerkungen einsehen — optional gefiltert nach Kategorie oder Mitglied —, damit ich weiß, für welche Mitglieder Vormerkungen offen sind und in welcher FIFO-Reihenfolge sie bedient werden.
+
+Der Endpunkt `GET /vormerkungen` steht ausschließlich der Rolle `thekendienst` zur Verfügung.
+Die Implementierung liegt in `VormerkungController.findAll()` und wertet die optionalen Query-Parameter `kategorieId` und `mitgliedId` aus.
+Das Ergebnis ist nach Eingangszeit aufsteigend sortiert und spiegelt damit die FIFO-Reihenfolge gemäß BR-028 wider.
+Ohne Filter werden alle offenen Vormerkungen zurückgegeben.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Vormerkungen abfragen
+
+  Scenario: Vormerkungen nach Kategorie filtern
+    Given es existieren 3 Vormerkungen für Kategorie "K-42" und 2 für andere Kategorien
+    When ich GET /vormerkungen?kategorieId=K-42 aufrufe
+    Then erhalte ich HTTP 200
+    And die Liste enthält genau 3 Einträge
+    And die Einträge sind aufsteigend nach Eingangszeit sortiert (FIFO-Reihenfolge)
+
+  Scenario: Vormerkungen nach Mitglied filtern
+    Given Mitglied "M-07" hat 2 offene Vormerkungen
+    When ich GET /vormerkungen?mitgliedId=M-07 aufrufe
+    Then erhalte ich HTTP 200
+    And die Liste enthält genau 2 Einträge dieses Mitglieds
+
+  Scenario: Keine Filter — alle Vormerkungen zurückgeben
+    Given das System enthält 5 offene Vormerkungen
+    When ich GET /vormerkungen aufrufe
+    Then erhalte ich HTTP 200
+    And die Liste enthält alle 5 Einträge
+
+  Scenario: Zugriff mit Rolle mitglied wird verweigert
+    Given ich bin als Mitglied authentifiziert
+    When ich GET /vormerkungen aufrufe
+    Then erhalte ich HTTP 403
+----
+
+== Abhängigkeiten
+
+- 0025 (Lesezugriffe Audit-Log — Epic-Basis)
+- 0022 (Vormerkung anlegen — erzeugt die abzufragenden Datensätze)
