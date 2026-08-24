@@ -2,7 +2,7 @@
 
 :issue-id: 0020
 :type: Story
-:status: open
+:status: closed
 :priority: Must
 :refs: UC-06, BR-037, BR-038
 :epic: 0017

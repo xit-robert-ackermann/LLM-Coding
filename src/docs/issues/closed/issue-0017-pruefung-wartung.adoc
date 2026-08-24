@@ -2,7 +2,7 @@
 
 :issue-id: 0017
 :type: EPIC
-:status: open
+:status: closed
 :priority: Must
 :refs: UC-04, UC-05, UC-06
 
