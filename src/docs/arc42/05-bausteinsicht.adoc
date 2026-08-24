@@ -51,46 +51,21 @@ LAYOUT_WITH_LEGEND()
 
 title Leihgut — Domänenmodul (C4 Ebene 3)
 
-Container_Boundary(domain, "Domäne") {
+Container_Boundary(domain, "Domaene") {
 
-    Component(ausleihe, "AusleiheService", "Use-Case-Handler",
-        "UC-01 Ausgabe, UC-02 Verlängerung,\nUC-03 Rückgabe.")
-
-    Component(pruefung, "PruefungService", "Use-Case-Handler",
-        "UC-04 Prüfprotokoll, Kautionsabschluss,\nNutzungszähler, Folgestatus.")
-
-    Component(wartung, "WartungService", "Use-Case-Handler",
-        "UC-05 Wartungsabschluss,\nNutzungszähler zurücksetzen.")
-
-    Component(einweisung, "EinweisungService", "Use-Case-Handler",
-        "UC-06 Einweisung anlegen.")
-
-    Component(vormerkung, "VormerkungService", "Use-Case-Handler",
-        "UC-07 Vormerken, UC-09 Reservierung anlegen\nund verfallen lassen.")
-
-    Component(katalog, "KatalogService", "Use-Case-Handler",
-        "UC-08 Kategorien und Gegenstände\nanlegen und abfragen.")
-
-    Component(audit, "AuditService", "Querschnittskomponente",
-        "Kautionsbewegungen und Zustandswechsel\naufzeichnen (BR-022).")
-
-    Component(uhr, "DateSource", "Clock-Interface",
-        "Austauschbare Datumsquelle (BR-039, UC-09).\nProduktiv: SystemDateSource. Tests: FixedDateSource.")
-
-    Component(repoGegenstand, "IGegenstandRepository", "Interface",
-        "CRUD für Gegenstand-Aggregate.")
-
-    Component(repoAusleihe, "IAusleiheRepository", "Interface",
-        "CRUD für Ausleihe-Aggregate.")
-
-    Component(repoMitglied, "IMitgliedRepository", "Interface",
-        "CRUD für Mitglied-Aggregate.")
-
-    Component(repoVormerkung, "IVormerkungRepository", "Interface",
-        "CRUD für Vormerkung- und Reservierungs-Aggregate.")
-
-    Component(repoAudit, "IAuditRepository", "Interface",
-        "Schreibt Audit-Einträge und Kautionsbewegungen.")
+    Component(ausleihe, "AusleiheService", "Use-Case-Handler", "UC-01/-02/-03")
+    Component(pruefung, "PruefungService", "Use-Case-Handler", "UC-04")
+    Component(wartung, "WartungService", "Use-Case-Handler", "UC-05")
+    Component(einweisung, "EinweisungService", "Use-Case-Handler", "UC-06")
+    Component(vormerkung, "VormerkungService", "Use-Case-Handler", "UC-07/-09")
+    Component(katalog, "KatalogService", "Use-Case-Handler", "UC-08/-10")
+    Component(audit, "AuditService", "Querschnitt", "BR-022")
+    Component(uhr, "DateSource", "Interface", "BR-039")
+    Component(repoGegenstand, "IGegenstandRepository", "Interface", "Gegenstand-Aggregate")
+    Component(repoAusleihe, "IAusleiheRepository", "Interface", "Ausleihe-Aggregate")
+    Component(repoMitglied, "IMitgliedRepository", "Interface", "Mitglied-Aggregate")
+    Component(repoVormerkung, "IVormerkungRepository", "Interface", "Vormerkung-Aggregate")
+    Component(repoAudit, "IAuditRepository", "Interface", "Audit-Eintraege")
 }
 
 Rel(ausleihe, repoGegenstand, "liest / schreibt")
@@ -103,7 +78,7 @@ Rel(ausleihe, uhr, "liest Datum")
 Rel(pruefung, repoAusleihe, "liest / schreibt")
 Rel(pruefung, repoGegenstand, "schreibt")
 Rel(pruefung, vormerkung, "löst Reservierung aus")
-Rel(pruefung, audit, "erzeugt ABZUG / FREIGABE,\nZustandswechsel")
+Rel(pruefung, audit, "ABZUG / FREIGABE / Zustandswechsel")
 Rel(pruefung, uhr, "liest Datum")
 
 Rel(wartung, repoGegenstand, "schreibt")
