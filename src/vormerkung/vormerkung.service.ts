@@ -92,12 +92,21 @@ export class VormerkungService {
     // Mark STORNIERT first so the cascade does not re-assign to this member
     this.db.update(schema.vormerkung).set({ status: 'STORNIERT' }).where(eq(schema.vormerkung.id, vormerkungId)).run();
 
-    // Check if this Vormerkung led to an active Reservierung for the same member
-    const res = this.db
+    // Check if this Vormerkung led to an active Reservierung for the same member AND the same kategorie
+    // (a member may have active reservations for multiple kategorien — only cancel the matching one)
+    const allActiveRes = this.db
       .select()
       .from(schema.reservierung)
       .where(and(eq(schema.reservierung.mitgliedId, vm.mitgliedId), eq(schema.reservierung.status, 'AKTIV')))
-      .get();
+      .all();
+    const res = allActiveRes.find((r) => {
+      const g = this.db
+        .select({ kategorieId: schema.gegenstand.kategorieId })
+        .from(schema.gegenstand)
+        .where(eq(schema.gegenstand.inventarnummer, r.gegenstandId))
+        .get();
+      return g?.kategorieId === vm.kategorieId;
+    });
 
     if (res) {
       this.db.update(schema.reservierung).set({ status: 'VERFALLEN' }).where(eq(schema.reservierung.id, res.id)).run();

@@ -339,6 +339,42 @@ describe('VormerkungService.stornieren', () => {
     const svc = makeService();
     expect(() => svc.stornieren('unbekannt')).toThrow(VormerkungNichtGefundenError);
   });
+
+  it('with active reservations for two kategorien → cancels only the matching one (bug-fix Kategoriefilter)', () => {
+    // Regression test: stornieren must not cancel a reservation for a different kategorie
+    const db = makeDb() as any;
+    const svc = new VormerkungService(db, new FixedDateSource(new Date('2024-01-15')));
+    seedBase(db); // provides kat-1, G-001, M-001, M-002, M-003
+
+    // Add a second kategorie + gegenstand
+    db.insert(schema.kategorie).values({
+      id: 'kat-2', name: 'Sägen', leihdauerTage: 7,
+      wartungsintervallAusleihen: 10, einweisungspflichtig: false,
+    }).run();
+    db.insert(schema.gegenstand).values({
+      inventarnummer: 'G-002', kategorieId: 'kat-2',
+      wiederbeschaffungswertEuro: 200, nutzungszaehler: 0, status: 'RESERVIERT',
+    }).run();
+
+    // M-001 has a WARTEND Vormerkung for kat-1 (will be storniert) …
+    db.insert(schema.vormerkung).values({
+      id: 'VM-kat1', mitgliedId: 'M-001', kategorieId: 'kat-1',
+      eingangszeit: '2024-01-10T08:00:00.000Z', status: 'WARTEND',
+    }).run();
+    // … and a separate AKTIV Reservierung for kat-2
+    db.insert(schema.reservierung).values({
+      id: 'R-kat2', gegenstandId: 'G-002', mitgliedId: 'M-001',
+      entstandenAm: '2024-01-15', verfaelltAm: '2024-01-18',
+      status: 'AKTIV',
+    }).run();
+
+    svc.stornieren('VM-kat1');
+
+    const allRes = db.select().from(schema.reservierung).all();
+    const rKat2 = allRes.find((r: any) => r.id === 'R-kat2');
+    // The kat-2 reservation must remain untouched
+    expect(rKat2?.status).toBe('AKTIV');
+  });
 });
 
 // --- reservierungStornieren ---
