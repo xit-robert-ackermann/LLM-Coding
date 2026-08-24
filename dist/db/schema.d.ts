@@ -625,3 +625,82 @@ export declare const einweisung: import("drizzle-orm/sqlite-core").SQLiteTableWi
     };
     dialect: "sqlite";
 }>;
+export declare const zustandswechsel: import("drizzle-orm/sqlite-core").SQLiteTableWithColumns<{
+    name: "zustandswechsel";
+    schema: undefined;
+    columns: {
+        id: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "id";
+            tableName: "zustandswechsel";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+        }, object>;
+        gegenstandId: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "gegenstand_id";
+            tableName: "zustandswechsel";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+        }, object>;
+        vonStatus: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "von_status";
+            tableName: "zustandswechsel";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+        }, object>;
+        nachStatus: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "nach_status";
+            tableName: "zustandswechsel";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+        }, object>;
+        grund: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "grund";
+            tableName: "zustandswechsel";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+        }, object>;
+        zeitstempel: import("drizzle-orm/sqlite-core").SQLiteColumn<{
+            name: "zeitstempel";
+            tableName: "zustandswechsel";
+            dataType: "string";
+            columnType: "SQLiteText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+        }, object>;
+    };
+    dialect: "sqlite";
+}>;

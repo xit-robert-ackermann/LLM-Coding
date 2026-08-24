@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.einweisung = exports.reservierung = exports.vormerkung = exports.kautionsbewegung = exports.pruefprotokoll = exports.ausleihe = exports.mitglied = exports.gegenstand = exports.kategorie = void 0;
+exports.zustandswechsel = exports.einweisung = exports.reservierung = exports.vormerkung = exports.kautionsbewegung = exports.pruefprotokoll = exports.ausleihe = exports.mitglied = exports.gegenstand = exports.kategorie = void 0;
 const sqlite_core_1 = require("drizzle-orm/sqlite-core");
 exports.kategorie = (0, sqlite_core_1.sqliteTable)('kategorie', {
     id: (0, sqlite_core_1.text)('id').primaryKey(),
@@ -66,5 +66,13 @@ exports.einweisung = (0, sqlite_core_1.sqliteTable)('einweisung', {
     mitgliedId: (0, sqlite_core_1.text)('mitglied_id').notNull().references(() => exports.mitglied.id),
     kategorieId: (0, sqlite_core_1.text)('kategorie_id').notNull().references(() => exports.kategorie.id),
     dokumentiertAm: (0, sqlite_core_1.text)('dokumentiert_am').notNull(),
+});
+exports.zustandswechsel = (0, sqlite_core_1.sqliteTable)('zustandswechsel', {
+    id: (0, sqlite_core_1.text)('id').primaryKey(),
+    gegenstandId: (0, sqlite_core_1.text)('gegenstand_id').notNull().references(() => exports.gegenstand.inventarnummer),
+    vonStatus: (0, sqlite_core_1.text)('von_status').notNull(),
+    nachStatus: (0, sqlite_core_1.text)('nach_status').notNull(),
+    grund: (0, sqlite_core_1.text)('grund').notNull(),
+    zeitstempel: (0, sqlite_core_1.text)('zeitstempel').notNull(),
 });
 //# sourceMappingURL=schema.js.map
