@@ -26,6 +26,8 @@ gesperrt = mindestens eine offene Ausleihe existiert,
 
 Ein Mitglied, das zwar überfällige Ausleihen hat, deren Gegenstände sich jedoch alle in Prüfung befinden, gilt als *nicht gesperrt*.
 
+Die Berechnung von „heute" erfolgt über `DateSource.today()`, damit Integrationstests deterministisch gegen einen festen Datumswert laufen können (BR-034/035).
+
 Ist die angefragte Mitglieds-ID unbekannt, antwortet das System mit HTTP 404 und Fehlercode `MITGLIED_NICHT_GEFUNDEN`.
 
 == Akzeptanzkriterien
@@ -66,5 +68,6 @@ Feature: Mitglied abfragen
 
 == Abhängigkeiten
 
+- 0004 (DateSource-Interface + Implementierungen)
 - 0007 (EPIC Stammdatenverwaltung)
 - 0011 (Mitglied anlegen)

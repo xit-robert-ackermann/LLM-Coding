@@ -1,0 +1,55 @@
+= Issue 0031: Zustandswechsel eines Gegenstands abfragen
+
+:issue-id: 0031
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-10
+:epic: 0025
+
+== Beschreibung
+
+Als Thekendienst oder Wart möchte ich die vollständige Zustandshistorie eines Gegenstands einsehen, damit ich nachvollziehen kann, wann und warum ein Gegenstand seinen Status geändert hat — beispielsweise wann er ausgemustert wurde oder warum er in Wartung ist.
+
+Der Endpunkt `GET /gegenstaende/{inventarnummer}/zustandswechsel` ist ausschließlich für die Rollen `thekendienst` und `wart` zugänglich.
+Die Implementierung delegiert von `GegenstandController.findZustandswechsel()` an `IAuditRepository.findZustandswechselByInventarnummer()`.
+Zurückgegeben wird eine zeitlich geordnete Liste von Zustandswechsel-Einträgen; jeder Eintrag enthält `vonStatus`, `nachStatus`, `grund` und `zeitstempel`.
+Ist die Inventarnummer unbekannt, wird 404 zurückgegeben.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Zustandswechsel eines Gegenstands abfragen
+
+  Scenario: Gegenstand mit bekannter Inventarnummer und Zustandswechseln
+    Given ein Gegenstand mit Inventarnummer "G-001" existiert
+    And dieser Gegenstand hat mehrere Zustandswechsel durchlaufen
+    When ich GET /gegenstaende/G-001/zustandswechsel aufrufe
+    Then erhalte ich HTTP 200
+    And die Liste enthält alle Zustandswechsel in chronologischer Reihenfolge
+    And jeder Eintrag enthält die Felder vonStatus, nachStatus, grund und zeitstempel
+
+  Scenario: Neuer Gegenstand ohne bisherige Zustandswechsel
+    Given ein Gegenstand mit Inventarnummer "G-NEU" existiert
+    And dieser Gegenstand hat noch keine Zustandswechsel durchlaufen
+    When ich GET /gegenstaende/G-NEU/zustandswechsel aufrufe
+    Then erhalte ich HTTP 200
+    And der Antwort-Body ist eine leere Liste
+
+  Scenario: Unbekannte Inventarnummer
+    Given kein Gegenstand mit Inventarnummer "UNBEKANNT" existiert
+    When ich GET /gegenstaende/UNBEKANNT/zustandswechsel aufrufe
+    Then erhalte ich HTTP 404
+
+  Scenario: Zugriff mit Rolle mitglied wird verweigert
+    Given ich bin als Mitglied authentifiziert
+    When ich GET /gegenstaende/G-001/zustandswechsel aufrufe
+    Then erhalte ich HTTP 403
+----
+
+== Abhängigkeiten
+
+- 0025 (Lesezugriffe Audit-Log — Epic-Basis)
+- 0009 (Gegenstand anlegen — legt Inventarnummer fest)
+- 0018 (Ausleihe abschließen — kann Zustandswechsel auslösen)

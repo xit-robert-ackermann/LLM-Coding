@@ -19,12 +19,12 @@ Zu implementieren sind zwei Endpunkte:
 
    Unterstützte Query-Parameter: `?von=<ISO-Datum>`, `?bis=<ISO-Datum>`, `?gegenstandId=<id>`
 
-2. `GET /mitglieder/:id/kautionen` im `MitgliedController` (`MitgliedController.findKautionen()`): Gibt ausschließlich die Kautionsbewegungen (KautionsbewegungEintrag) des angegebenen Mitglieds zurück — mit Typ, Betrag und Zeitstempel je Eintrag.
+2. `GET /ausleihen/{id}/kautionsbewegungen` im `AusleiheController`: Gibt die Liste aller Kautionsbewegungen (KautionsbewegungEintrag) für die angegebene Ausleihe zurück — mit Typ, Betrag und Zeitstempel je Eintrag.
 
 Gemäß BR-022 erzeugt jede Kautionsbewegung (Hinterlegung, Abzug, Freigabe) automatisch einen `KautionsbewegungEintrag` im Audit-Log. Die Lesezugriffe hier geben diesen vorhandenen Log aus; sie schreiben nicht selbst.
 
 Zugriff auf `GET /audit` ist auf die Rollen `wart` und `thekendienst` beschränkt. Mitglieder erhalten 403.
-Zugriff auf `GET /mitglieder/:id/kautionen` ist auf `thekendienst` beschränkt.
+Zugriff auf `GET /ausleihen/{id}/kautionsbewegungen` ist auf die Rollen `thekendienst` und `wart` beschränkt.
 
 == Akzeptanzkriterien
 
@@ -53,17 +53,17 @@ Feature: Audit-Log und Kautionsbewegungen abfragen
     Then erhält er den Status 200
     And die Antwort enthält ausschließlich Einträge mit Zeitstempel im Jahr 2024
 
-  Scenario: Kautionsbewegungen eines Mitglieds abrufen
+  Scenario: Kautionsbewegungen einer bekannten Ausleihe abrufen
     Given der Benutzer ist als Thekendienst authentifiziert
-    And Mitglied M-10 hat eine HINTERLEGUNG (50 €), einen ABZUG (10 €) und eine FREIGABE (40 €) im Log
-    When er GET /mitglieder/M-10/kautionen aufruft
+    And Ausleihe A-10 hat eine HINTERLEGUNG (50 €), einen ABZUG (10 €) und eine FREIGABE (40 €) im Log
+    When er GET /ausleihen/A-10/kautionsbewegungen aufruft
     Then erhält er den Status 200
     And die Antwort enthält genau drei Einträge mit Typ, Betrag und Zeitstempel
 
-  Scenario: Kautionsbewegungen für unbekanntes Mitglied
+  Scenario: Kautionsbewegungen für unbekannte Ausleihe
     Given der Benutzer ist als Thekendienst authentifiziert
-    And kein Mitglied mit ID "M-999" existiert
-    When er GET /mitglieder/M-999/kautionen aufruft
+    And keine Ausleihe mit ID "A-999" existiert
+    When er GET /ausleihen/A-999/kautionsbewegungen aufruft
     Then erhält er den Status 404
 
   Scenario: Mitglied hat keinen Zugriff auf das Audit-Log

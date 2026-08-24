@@ -70,6 +70,12 @@ Feature: Rückgabe entgegennehmen
     Given eine Ausleihe mit Status ABGESCHLOSSEN
     When der Thekendienst POST /ausleihen/:id/rueckgabe aufruft
     Then antwortet der Server mit 409
+    And der Fehlercode ist "AUSLEIHE_NICHT_OFFEN"
+
+  Scenario: Gegenstand bereits in Prüfung
+    Given eine Ausleihe ist offen aber der Gegenstand ist bereits IN_PRUEFUNG
+    When POST /ausleihen/{id}/rueckgabe
+    Then HTTP 409 und Fehlercode AUSLEIHE_NICHT_OFFEN
 ----
 
 == Abhängigkeiten

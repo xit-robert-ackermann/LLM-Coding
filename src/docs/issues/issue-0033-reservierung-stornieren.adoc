@@ -1,0 +1,63 @@
+= Issue 0033: Reservierung stornieren
+
+:issue-id: 0033
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-07, BR-029, BR-031, BR-033
+:epic: 0021
+
+== Beschreibung
+
+Als Mitglied möchte ich eine für mich angelegte Reservierung stornieren, damit ich den reservierten Gegenstand freigebe, wenn ich ihn doch nicht abholen kann.
+
+Der Endpunkt `DELETE /reservierungen/{id}` steht der Rolle `mitglied` zur Verfügung.
+Die Implementierung liegt in `ReservierungController.stornieren()`, das an `VormerkungService.reservierungStornieren()` delegiert.
+Die Stornierung setzt den Reservierungsstatus auf VERFALLEN und den Gegenstandstatus zurück auf VERFUEGBAR.
+Anschließend wird sofort `reservierungAnlegen()` für das nächste Mitglied in der Warteschlange aufgerufen (Kaskaden-Logik analog BR-031), sodass kein Gegenstand unnötig lange blockiert bleibt.
+
+Abgrenzung zu Issue 0023 (`DELETE /vormerkungen/{id}`): Hier existiert bereits eine konkrete Reservierung — der Gegenstand befindet sich im Status RESERVIERT.
+Bei Issue 0023 wird hingegen eine bloße Vormerkung (Gegenstand noch nicht reserviert) gelöscht.
+Das Stornieren einer Reservierung ist auch gesperrten Mitgliedern erlaubt (BR-033), da sie dadurch Ressourcen freigeben.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Reservierung stornieren
+
+  Scenario: Eigene Reservierung erfolgreich stornieren — kein Nachfolger in Queue
+    Given ich bin als Mitglied "M-01" authentifiziert
+    And eine Reservierung mit id "R-10" gehört mir
+    And es gibt kein weiteres Mitglied in der Warteschlange für diesen Gegenstand
+    When ich DELETE /reservierungen/R-10 aufrufe
+    Then erhalte ich HTTP 204
+    And der Reservierungsstatus ist VERFALLEN
+    And der Gegenstandstatus ist VERFUEGBAR
+
+  Scenario: Stornierung löst Folgereservierung für nächstes Mitglied aus
+    Given ich bin als Mitglied "M-01" authentifiziert
+    And eine Reservierung mit id "R-10" gehört mir
+    And Mitglied "M-02" steht als Nächstes in der Warteschlange
+    When ich DELETE /reservierungen/R-10 aufrufe
+    Then erhalte ich HTTP 204
+    And für Mitglied "M-02" wurde automatisch eine neue Reservierung angelegt
+
+  Scenario: Unbekannte Reservierungs-ID
+    Given keine Reservierung mit id "UNBEKANNT" existiert
+    When ich DELETE /reservierungen/UNBEKANNT aufrufe
+    Then erhalte ich HTTP 404
+
+  Scenario: Gesperrtes Mitglied darf eigene Reservierung stornieren
+    Given ich bin als gesperrtes Mitglied "M-03" authentifiziert
+    And eine Reservierung mit id "R-11" gehört mir
+    When ich DELETE /reservierungen/R-11 aufrufe
+    Then erhalte ich HTTP 204
+    And der Reservierungsstatus ist VERFALLEN
+----
+
+== Abhängigkeiten
+
+- 0021 (Reservierung anlegen — Epic-Basis)
+- 0022 (Vormerkung anlegen — liefert die Queue für die Kaskaden-Logik)
+- 0024 (Reservierungsverfall — gleiche Zustandsübergänge, unterschiedlicher Auslöser)

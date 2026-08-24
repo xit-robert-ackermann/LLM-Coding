@@ -20,7 +20,7 @@ Der EPIC deckt drei Use Cases ab:
   Die endgültige Kautionsentscheidung sowie der Abschluss der Ausleihe erfolgen in UC-04 (Prüfung durch den Wart).
 
 Die Stories dieses EPICs bilden die REST-Schnittstellen `POST /ausleihen`,
-`PATCH /ausleihen/:id/verlaengern` und `POST /ausleihen/:id/rueckgabe` ab.
+`POST /ausleihen/{id}/verlaengern` und `POST /ausleihen/:id/rueckgabe` ab.
 
 == Enthaltene Stories
 

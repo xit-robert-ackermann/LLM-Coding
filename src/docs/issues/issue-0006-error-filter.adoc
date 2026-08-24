@@ -4,7 +4,7 @@
 :type: Story
 :status: open
 :priority: Must
-:refs: UC-08, BR-001
+:refs: interface-contracts.adoc (Fehlerkatalog)
 :epic: 0001
 
 == Beschreibung
@@ -38,10 +38,10 @@ Feature: Globaler ErrorFilter und Domänenfehler-Klassen
     And der Response-Body ist `{"code":"GEGENSTAND_NICHT_VERFUEGBAR","message":"..."}`
     And der Response-Header `Content-Type` enthält `application/json`
 
-  Scenario: MitgliedGesperrtError liefert HTTP 422
+  Scenario: MitgliedGesperrtError liefert HTTP 409
     Given ein Endpunkt wirft intern `new MitgliedGesperrtError()`
     When der entsprechende HTTP-Request gesendet wird
-    Then antwortet der Server mit HTTP 422
+    Then antwortet der Server mit HTTP 409
     And der Response-Body enthält `"code":"MITGLIED_GESPERRT"`
 
   Scenario: Unerwarteter Fehler liefert HTTP 500 ohne Stack-Trace

@@ -45,17 +45,20 @@ Feature: Mitglied anlegen
   Scenario: Fehlendes Pflichtfeld name
     Given der Thekendienst ist authentifiziert
     When er POST /mitglieder aufruft ohne das Feld "name"
-    Then antwortet das System mit HTTP 422
+    Then antwortet das System mit HTTP 400
+    And der Fehlercode lautet "EINGABE_UNGUELTIG"
 
   Scenario: Leerer String als Name
     Given der Thekendienst ist authentifiziert
     When er POST /mitglieder aufruft mit name ""
-    Then antwortet das System mit HTTP 422
+    Then antwortet das System mit HTTP 400
+    And der Fehlercode lautet "EINGABE_UNGUELTIG"
 
   Scenario: Name besteht nur aus Leerzeichen
     Given der Thekendienst ist authentifiziert
     When er POST /mitglieder aufruft mit name "   "
-    Then antwortet das System mit HTTP 422
+    Then antwortet das System mit HTTP 400
+    And der Fehlercode lautet "EINGABE_UNGUELTIG"
 ----
 
 == Abhängigkeiten

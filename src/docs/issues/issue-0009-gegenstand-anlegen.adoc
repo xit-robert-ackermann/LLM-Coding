@@ -34,7 +34,7 @@ Validierungsregeln (BR-001, BR-003):
 
 Fehlercodes:
 
-- `INVENTARNUMMER_BEREITS_VERGEBEN` → HTTP 409
+- `DUPLIKAT` → HTTP 409
 - `KATEGORIE_NICHT_GEFUNDEN` → HTTP 404
 
 == Akzeptanzkriterien
@@ -75,7 +75,7 @@ Feature: Gegenstand anlegen
     Given ein Gegenstand mit inventarnummer "INV-001" existiert bereits im System
     When der Thekendienst POST /gegenstaende aufruft mit inventarnummer "INV-001"
     Then antwortet das System mit HTTP 409
-    And der Fehlercode lautet "INVENTARNUMMER_BEREITS_VERGEBEN"
+    And der Fehlercode lautet "DUPLIKAT"
 
   Scenario: Unbekannte Kategorie
     Given keine Kategorie mit id "kat-99" existiert im System

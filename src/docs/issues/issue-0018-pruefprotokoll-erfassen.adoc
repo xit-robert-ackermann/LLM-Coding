@@ -85,15 +85,26 @@ Feature: Prüfprotokoll erfassen
     And die gesamte Kaution von 50 Euro wird einbehalten
     And ein Audit-Eintrag für die vollständige Einbehaltung ist vorhanden
 
-  Scenario: IRREPARABEL
-    Given eine Ausleihe mit Status IN_PRUEFUNG
-    When der Wart `leihgut pruefe <ausleiheId> --ergebnis IRREPARABEL` ausführt
+  Scenario: IRREPARABEL ohne Abzug
+    Given eine Ausleihe mit Status IN_PRUEFUNG und hinterlegter Kaution von 50 Euro
+    When der Wart `leihgut pruefe <id> --ergebnis IRREPARABEL` ausführt
     Then erhält die Ausleihe den Status ABGESCHLOSSEN
     And der GegenstandStatus wechselt auf AUSGEMUSTERT
+    And die Kaution wird vollständig freigegeben
+    And ein Audit-Eintrag vom Typ FREIGABE ist vorhanden
+
+  Scenario: IRREPARABEL mit Abzug
+    Given eine Ausleihe mit Status IN_PRUEFUNG und hinterlegter Kaution von 50 Euro
+    When der Wart `leihgut pruefe <id> --ergebnis IRREPARABEL --abzug 30` ausführt
+    Then erhält die Ausleihe den Status ABGESCHLOSSEN
+    And der GegenstandStatus wechselt auf AUSGEMUSTERT
+    And 30 Euro werden einbehalten
+    And 20 Euro werden freigegeben
+    And zwei Audit-Einträge sind vorhanden: ein Eintrag vom Typ ABZUG und ein Eintrag vom Typ FREIGABE
 
   Scenario: Nach Prüfung verfügbar mit offener Vormerkung
     Given eine Ausleihe mit Status IN_PRUEFUNG
-    And eine offene Vormerkung für den betreffenden Gegenstand liegt vor
+    And eine offene Vormerkung für die Kategorie dieses Gegenstands liegt vor
     When der Wart `leihgut pruefe <ausleiheId> --ergebnis OK` ausführt
     And der Gegenstand wechselt auf VERFUEGBAR
     Then wird automatisch eine Reservierung für das erste wartende Mitglied angelegt

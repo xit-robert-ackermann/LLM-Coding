@@ -4,7 +4,7 @@
 :type: Story
 :status: open
 :priority: Must
-:refs: UC-07, BR-026, BR-027, BR-028, BR-033
+:refs: UC-07, BR-027, BR-028, BR-033
 :epic: 0021
 
 == Beschreibung

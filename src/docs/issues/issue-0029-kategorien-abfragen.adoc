@@ -1,0 +1,48 @@
+= Issue 0029: Kategorien abfragen
+
+:issue-id: 0029
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-08, BR-001, BR-002
+:epic: 0007
+
+== Beschreibung
+
+Als Mitglied oder Thekendienst möchte ich alle verfügbaren Kategorien abrufen, damit ich beim Anlegen eines Gegenstands oder beim Vormerken die richtige Kategorie-ID verwenden kann.
+
+Der Endpunkt `GET /kategorien` liefert die vollständige Liste aller im System bekannten Kategorien.
+Die Implementierung delegiert von `KategorieController.findAll()` an `KatalogService.kategorienAbfragen()`.
+Zurückgegeben wird eine Liste von Kategorie-Objekten mit den Feldern `id`, `name`, `leihdauerTage`, `wartungsintervall` und `einweisungspflicht`.
+Der Lesezugriff ist für die Rollen `mitglied` und `thekendienst` erlaubt (BR-001, BR-002).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Kategorien abfragen
+
+  Scenario: Keine Kategorien vorhanden
+    Given das System enthält keine Kategorien
+    When ich GET /kategorien aufrufe
+    Then erhalte ich HTTP 200
+    And der Antwort-Body ist eine leere Liste
+
+  Scenario: Drei Kategorien vorhanden
+    Given das System enthält 3 Kategorien
+    When ich GET /kategorien aufrufe
+    Then erhalte ich HTTP 200
+    And der Antwort-Body enthält genau 3 Einträge
+    And jeder Eintrag enthält die Felder id, name, leihdauerTage, wartungsintervall und einweisungspflicht
+
+  Scenario: Zugriff mit Rolle mitglied
+    Given ich bin als Mitglied authentifiziert
+    When ich GET /kategorien aufrufe
+    Then erhalte ich HTTP 200
+    And die vollständige Kategorienliste wird zurückgegeben
+----
+
+== Abhängigkeiten
+
+- 0007 (Kategorie anlegen — Epic-Basis)
+- 0008 (Gegenstand anlegen — benötigt Kategorie-IDs)

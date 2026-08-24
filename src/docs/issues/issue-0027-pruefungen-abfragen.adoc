@@ -1,4 +1,4 @@
-= Issue 0027: Prüfprotokolle abfragen
+= Issue 0027: Prüf-Arbeitsliste abrufen (GET /pruefungen)
 
 :issue-id: 0027
 :type: Story
@@ -9,15 +9,15 @@
 
 == Beschreibung
 
-Als Wart möchte ich abgeschlossene Prüfprotokolle einsehen können, damit ich die vollständige Prüfhistorie eines Gegenstands nachvollziehen und bei Bedarf frühere Prüfergebnisse mit Abzügen und Notizen nachlesen kann.
+Als Wart möchte ich sehen, welche Ausleihen gerade in Prüfung sind (Status IN_PRUEFUNG),
+damit ich weiß, welche Gegenstände ich als nächstes prüfen soll.
 
-Zu implementieren sind die Endpunkte `GET /pruefungen` und `GET /pruefungen/:id` im `PruefungController`. Der Controller delegiert an den `PruefungService`, der die Abfragen über das Prüfprotokoll-Repository ausführt.
+Zu implementieren ist der Endpunkt `GET /pruefungen` im `PruefungController`.
+Der Controller delegiert an den `PruefungService`, der alle Ausleihen zurückgibt,
+bei denen der zugehörige Gegenstand den Status `IN_PRUEFUNG` hat.
 
-Unterstützter Query-Parameter für `GET /pruefungen`:
-
-- `?gegenstandId=<id>` — liefert nur Prüfprotokolle des angegebenen Gegenstands
-
-Jedes Prüfprotokoll enthält mindestens: Prüfergebnis, Kautionsabzug (Betrag), Notiz des Warts sowie Datum der Prüfung.
+Dies entspricht semantisch einem Filter auf `GET /ausleihen?status=IN_PRUEFUNG`,
+ist aber als eigener, sprechend benannter Endpunkt für den Wart-Workflow vorgesehen.
 
 Zugriff ist auf die Rollen `wart` und `thekendienst` beschränkt. Mitglieder erhalten 403.
 
@@ -25,41 +25,21 @@ Zugriff ist auf die Rollen `wart` und `thekendienst` beschränkt. Mitglieder erh
 
 [source,gherkin]
 ----
-Feature: Prüfprotokolle abfragen
+Feature: Prüf-Arbeitsliste abrufen
 
-  Scenario: Alle Prüfprotokolle abrufen
+  Scenario: Ausleihen mit Status IN_PRUEFUNG abrufen
     Given der Benutzer ist als Wart authentifiziert
-    And es existieren Prüfprotokolle in der Datenbank
+    And 2 Ausleihen existieren, deren Gegenstand den Status IN_PRUEFUNG hat
     When er GET /pruefungen aufruft
     Then erhält er den Status 200
-    And die Antwort enthält eine Liste aller Prüfprotokolle
+    And die Antwort enthält genau diese 2 Ausleihen
 
-  Scenario: Keine Prüfprotokolle vorhanden
+  Scenario: Kein Gegenstand in Prüfung
     Given der Benutzer ist als Wart authentifiziert
-    And es existieren keine Prüfprotokolle in der Datenbank
+    And kein Gegenstand hat den Status IN_PRUEFUNG
     When er GET /pruefungen aufruft
     Then erhält er den Status 200
     And die Antwort enthält eine leere Liste
-
-  Scenario: Prüfprotokolle nach Gegenstand filtern
-    Given der Benutzer ist als Wart authentifiziert
-    And Gegenstand mit ID "G-7" hat drei Prüfprotokolle
-    When er GET /pruefungen?gegenstandId=G-7 aufruft
-    Then erhält er den Status 200
-    And die Antwort enthält genau die drei Prüfprotokolle für Gegenstand G-7
-
-  Scenario: Einzelnes Prüfprotokoll anhand bekannter ID abrufen
-    Given der Benutzer ist als Wart authentifiziert
-    And ein Prüfprotokoll mit ID "P-12" existiert
-    When er GET /pruefungen/P-12 aufruft
-    Then erhält er den Status 200
-    And die Antwort enthält das vollständige Prüfprotokoll mit Ergebnis, Abzug, Notiz und Datum
-
-  Scenario: Prüfprotokoll mit unbekannter ID
-    Given der Benutzer ist als Wart authentifiziert
-    And kein Prüfprotokoll mit ID "P-999" existiert
-    When er GET /pruefungen/P-999 aufruft
-    Then erhält er den Status 404
 
   Scenario: Mitglied hat keinen Zugriff
     Given der Benutzer ist als Mitglied authentifiziert
@@ -70,4 +50,4 @@ Feature: Prüfprotokolle abfragen
 == Abhängigkeiten
 
 - 0025 (EPIC Lesezugriffe und Audit-Log)
-- 0018 (Prüfung durchführen — Entitätsmodell Prüfprotokoll)
+- 0018 (Prüfprotokoll erfassen — setzt Gegenstand auf IN_PRUEFUNG)

@@ -50,17 +50,25 @@ Feature: Kategorie anlegen
   Scenario: Pflichtfeld fehlt
     Given der Thekendienst ist authentifiziert
     When er POST /kategorien aufruft ohne das Feld "name"
-    Then antwortet das System mit HTTP 422
+    Then antwortet das System mit HTTP 400
+    And der Fehlercode lautet "EINGABE_UNGUELTIG"
 
   Scenario: Leihdauer ist 0
     Given der Thekendienst ist authentifiziert
     When er POST /kategorien aufruft mit leihdauerTage 0
-    Then antwortet das System mit HTTP 422
+    Then antwortet das System mit HTTP 400
+    And der Fehlercode lautet "EINGABE_UNGUELTIG"
 
   Scenario: Wartungsintervall ist 0
     Given der Thekendienst ist authentifiziert
     When er POST /kategorien aufruft mit wartungsintervall 0
-    Then antwortet das System mit HTTP 422
+    Then antwortet das System mit HTTP 400
+    And der Fehlercode lautet "EINGABE_UNGUELTIG"
+
+  Scenario: Kategoriename bereits vorhanden
+    Given eine Kategorie mit dem Namen "Werkzeug" existiert bereits
+    When POST /kategorien mit {"name": "Werkzeug", ...}
+    Then HTTP 409 und Fehlercode DUPLIKAT
 ----
 
 == Abhängigkeiten

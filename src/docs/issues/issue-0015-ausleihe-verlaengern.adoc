@@ -13,7 +13,7 @@ Als Thekendienst möchte ich eine laufende Ausleihe verlängern,
 damit ein Mitglied mehr Zeit für die Rückgabe erhält, ohne einen Neuvertrag aufzusetzen.
 
 *Technischer Kontext:*
-Der Endpunkt `PATCH /ausleihen/:id/verlaengern` wird durch `AusleiheController.verlaengern()`
+Der Endpunkt `POST /ausleihen/{id}/verlaengern` wird durch `AusleiheController.verlaengern()`
 bedient; die Logik liegt in `AusleiheService.verlaengern()`.
 
 Die Methode prüft in dieser Reihenfolge:
@@ -30,8 +30,9 @@ Bei erfolgreicher Prüfung:
 * Die aktualisierte Ausleihe wird mit Status 200 zurückgegeben.
 
 Eine Verlängerung ist genau einmal je Ausleihe möglich (BR-012).
-Ist die Ausleihe bereits verlängert, überfällig oder durch eine Vormerkung blockiert,
-wird in allen Fällen 409 `VERLAENGERUNG_NICHT_MOEGLICH` geworfen (BR-013).
+Ist die Ausleihe bereits verlängert, wird 409 `BEREITS_VERLAENGERT` geworfen;
+ist sie überfällig (`rueckgabeFrist < heute`, geprüft via `DateSource.today()`), 409 `AUSLEIHE_UEBERFAELLIG`;
+existiert eine offene Vormerkung für die Kategorie, 409 `VORMERKUNG_VORHANDEN` (BR-013).
 
 == Akzeptanzkriterien
 
@@ -42,33 +43,33 @@ Feature: Ausleihe verlängern
   Scenario: Erfolgreiche Verlängerung
     Given eine offene, nicht verlängerte und nicht überfällige Ausleihe
     And keine Vormerkung auf die Gegenstandskategorie
-    When der Thekendienst PATCH /ausleihen/:id/verlaengern aufruft
+    When der Thekendienst POST /ausleihen/{id}/verlaengern aufruft
     Then antwortet der Server mit 200
     And die neue Rückgabefrist entspricht der alten Rückgabefrist plus Leihdauer
     And das Flag "verlängert" ist true
 
   Scenario: Ausleihe bereits verlängert
     Given eine offene Ausleihe mit verlängert = true
-    When der Thekendienst PATCH /ausleihen/:id/verlaengern aufruft
+    When der Thekendienst POST /ausleihen/{id}/verlaengern aufruft
     Then antwortet der Server mit 409
-    And der Fehlercode ist VERLAENGERUNG_NICHT_MOEGLICH
+    And der Fehlercode ist BEREITS_VERLAENGERT
 
   Scenario: Ausleihe überfällig
     Given eine offene Ausleihe, deren Rückgabefrist vor dem heutigen Tag liegt
-    When der Thekendienst PATCH /ausleihen/:id/verlaengern aufruft
+    When der Thekendienst POST /ausleihen/{id}/verlaengern aufruft
     Then antwortet der Server mit 409
-    And der Fehlercode ist VERLAENGERUNG_NICHT_MOEGLICH
+    And der Fehlercode ist AUSLEIHE_UEBERFAELLIG
 
   Scenario: Offene Vormerkung für die Kategorie
     Given eine offene, nicht verlängerte Ausleihe
     And eine offene Vormerkung eines anderen Mitglieds auf dieselbe Gegenstandskategorie
-    When der Thekendienst PATCH /ausleihen/:id/verlaengern aufruft
+    When der Thekendienst POST /ausleihen/{id}/verlaengern aufruft
     Then antwortet der Server mit 409
-    And der Fehlercode ist VERLAENGERUNG_NICHT_MOEGLICH
+    And der Fehlercode ist VORMERKUNG_VORHANDEN
 
   Scenario: Unbekannte Ausleihe-ID
     Given eine ID, zu der keine Ausleihe existiert
-    When der Thekendienst PATCH /ausleihen/:id/verlaengern aufruft
+    When der Thekendienst POST /ausleihen/{id}/verlaengern aufruft
     Then antwortet der Server mit 404
     And der Fehlercode ist AUSLEIHE_NICHT_GEFUNDEN
 ----
@@ -76,4 +77,5 @@ Feature: Ausleihe verlängern
 == Abhängigkeiten
 
 * 0013 – EPIC Ausleihbetrieb
+* 0004 – DateSource-Interface + Implementierungen
 * 0014 – Gegenstand ausgeben (Ausleihe muss existieren)

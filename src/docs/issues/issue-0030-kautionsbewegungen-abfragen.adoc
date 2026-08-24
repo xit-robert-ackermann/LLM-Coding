@@ -1,0 +1,54 @@
+= Issue 0030: Kautionsbewegungen einer Ausleihe abfragen
+
+:issue-id: 0030
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-10, BR-022
+:epic: 0025
+
+== Beschreibung
+
+Als Thekendienst oder Wart möchte ich die Kautionsbewegungen einer bestimmten Ausleihe einsehen, damit ich dem Mitglied transparent erklären kann, wie viel Kaution hinterlegt, abgezogen und freigegeben wurde.
+
+Der Endpunkt `GET /ausleihen/{id}/kautionsbewegungen` ist ausschließlich für die Rollen `thekendienst` und `wart` zugänglich.
+Die Implementierung delegiert von `AusleiheController.findKautionsbewegungen()` an `IAuditRepository.findByAusleiheId()`.
+Zurückgegeben wird eine zeitlich geordnete Liste von Kautionsbewegungen; jeder Eintrag enthält `typ` (HINTERLEGUNG, ABZUG oder FREIGABE), `betrag` und `zeitstempel`.
+Ist die Ausleihe unbekannt, wird 404 zurückgegeben.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Kautionsbewegungen einer Ausleihe abfragen
+
+  Scenario: Ausleihe mit Kautionshinterlegung
+    Given eine Ausleihe mit id "A1" existiert
+    And für diese Ausleihe wurde eine Kaution hinterlegt
+    When ich GET /ausleihen/A1/kautionsbewegungen aufrufe
+    Then erhalte ich HTTP 200
+    And die Liste enthält genau einen Eintrag vom Typ HINTERLEGUNG
+
+  Scenario: Abgeschlossene Ausleihe mit vollständiger Kautionshistorie
+    Given eine abgeschlossene Ausleihe mit id "A2" existiert
+    And für diese Ausleihe gibt es Einträge vom Typ HINTERLEGUNG und FREIGABE
+    When ich GET /ausleihen/A2/kautionsbewegungen aufrufe
+    Then erhalte ich HTTP 200
+    And die Liste enthält Einträge vom Typ HINTERLEGUNG und FREIGABE in chronologischer Reihenfolge
+
+  Scenario: Unbekannte Ausleihe-ID
+    Given keine Ausleihe mit id "UNBEKANNT" existiert
+    When ich GET /ausleihen/UNBEKANNT/kautionsbewegungen aufrufe
+    Then erhalte ich HTTP 404
+
+  Scenario: Zugriff mit Rolle mitglied wird verweigert
+    Given ich bin als Mitglied authentifiziert
+    When ich GET /ausleihen/A1/kautionsbewegungen aufrufe
+    Then erhalte ich HTTP 403
+----
+
+== Abhängigkeiten
+
+- 0025 (Lesezugriffe Audit-Log — Epic-Basis)
+- 0014 (Ausleihe anlegen — erzeugt Kautionsbewegungen)
+- 0018 (Ausleihe abschließen — erzeugt FREIGABE/ABZUG)

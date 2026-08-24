@@ -16,7 +16,7 @@ Umfang der Stories dieses EPICs:
 
 - *0026* — Ausleihen abfragen (`GET /ausleihen`, `GET /ausleihen/:id`)
 - *0027* — Prüfprotokolle abfragen (`GET /pruefungen`, `GET /pruefungen/:id`)
-- *0028* — Audit-Log und Kautionsbewegungen (`GET /audit`, `GET /mitglieder/:id/kautionen`)
+- *0028* — Audit-Log und Kautionsbewegungen (`GET /audit`, `GET /ausleihen/{id}/kautionsbewegungen`)
 
 == Akzeptanzkriterien
 
@@ -47,7 +47,7 @@ Feature: Lesezugriffe und Audit-Log
 
 == Abhängigkeiten
 
-- 0001 (Gegenstand verwalten — Entitätsmodell Gegenstand)
-- 0007 (Ausleihe anlegen — Entitätsmodell Ausleihe)
-- 0013 (Kaution hinterlegen — Entitätsmodell Kaution / Kautionsbewegung)
-- 0017 (Prüfung durchführen — Entitätsmodell Prüfprotokoll)
+- 0001 (Projektskelett)
+- 0007 (Stammdaten)
+- 0013 (Ausleihbetrieb)
+- 0017 (Prüfung, Wartung und Einweisung)

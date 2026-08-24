@@ -20,6 +20,7 @@ in folgender Reihenfolge:
 . Mitglied ist nicht gesperrt (BR-009).
    Eine Sperre liegt vor, wenn das Mitglied mindestens eine überfällige, noch offene Ausleihe besitzt
    (`rueckgabeFrist < heute` und Gegenstand nicht in Prüfung, vgl. BR-034/035).
+   Die Rückgabefristberechnung (`ausgabeDatum + leihdauer`) und die Sperr-Prüfung nutzen `DateSource.today()`.
 . Aktive Ausleihen des Mitglieds sind weniger als 3 (BR-008).
 . Gegenstand ist verfügbar *oder* für genau dieses Mitglied reserviert (BR-007).
 . Falls der Gegenstand einweisungspflichtig ist, muss eine dokumentierte Einweisung für das Mitglied vorliegen (BR-010).
@@ -72,7 +73,7 @@ Feature: Gegenstand ausgeben
     And ein verfügbarer Gegenstand
     When der Thekendienst POST /ausleihen aufruft
     Then antwortet der Server mit 409
-    And der Fehlercode ist AUSLEIHLIMIT_ERREICHT
+    And der Fehlercode ist MAX_AUSLEIHEN_ERREICHT
 
   Scenario: Einweisung fehlt
     Given ein einweisungspflichtiger Gegenstand im Status VERFUEGBAR
@@ -85,5 +86,6 @@ Feature: Gegenstand ausgeben
 == Abhängigkeiten
 
 * 0013 – EPIC Ausleihbetrieb
+* 0004 – DateSource-Interface + Implementierungen
 * 0005 – Rollen-Middleware (Absicherung auf Rolle `thekendienst`)
 * 0006 – ErrorFilter (einheitliche Fehlerantworten)

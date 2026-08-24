@@ -19,8 +19,9 @@ Zwei Endpunkte werden implementiert:
 Beide Query-Parameter sind optional.
 Werden sie kombiniert, werden beide Bedingungen als UND-Verknüpfung ausgewertet.
 
-`GET /gegenstaende/:id` — liefert einen einzelnen Gegenstand anhand seiner systeminternen ID.
-Ist die ID unbekannt, antwortet das System mit HTTP 404.
+`GET /gegenstaende/{inventarnummer}` — liefert einen einzelnen Gegenstand anhand seiner Inventarnummer (fachlicher Schlüssel).
+Der Pfadparameter ist die Inventarnummer (fachlicher Schlüssel), nicht eine interne Datenbank-ID.
+Ist die Inventarnummer unbekannt, antwortet das System mit HTTP 404.
 
 Die Antwort enthält die Gegenstandsdaten inkl. berechneter Kaution und aktuellem Status.
 Mitgliedsbezogene Sperrinformationen werden in dieser Story *nicht* ermittelt — das ist Aufgabe von Issue 0012.
@@ -52,14 +53,14 @@ Feature: Gegenstände abfragen
     And die Antwort enthält nur Gegenstände der Kategorie "kat-1"
 
   Scenario: Einzelnen Gegenstand abrufen
-    Given ein Gegenstand mit id "obj-42" existiert im System
-    When ein Nutzer GET /gegenstaende/obj-42 aufruft
+    Given ein Gegenstand mit inventarnummer "INV-042" existiert im System
+    When ein Nutzer GET /gegenstaende/INV-042 aufruft
     Then antwortet das System mit HTTP 200
-    And die Antwort enthält den Gegenstand mit id "obj-42"
+    And die Antwort enthält den Gegenstand mit inventarnummer "INV-042"
 
-  Scenario: Unbekannte Gegenstand-ID
-    Given kein Gegenstand mit id "obj-99" existiert im System
-    When ein Nutzer GET /gegenstaende/obj-99 aufruft
+  Scenario: Unbekannte Inventarnummer
+    Given kein Gegenstand mit inventarnummer "INV-099" existiert im System
+    When ein Nutzer GET /gegenstaende/INV-099 aufruft
     Then antwortet das System mit HTTP 404
 ----
 
