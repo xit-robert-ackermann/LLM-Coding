@@ -1,0 +1,463 @@
+=== Architekturentscheidungen
+
+Dieses Kapitel dokumentiert die vier zentralen Architekturentscheidungen des Systems _Leihgut_.
+Jede Entscheidung folgt dem Nygard-Format mit einer Pugh-Matrix über drei Optionen.
+
+---
+
+==== ADR-001: Persistenzstrategie
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Status
+|Akzeptiert
+
+|Datum
+|2026-08-11
+|===
+
+===== Kontext
+
+Das System läuft als einzelner Prozess, lokal, ohne externe Dienste (PRD: Rahmenbedingungen).
+Daten — Mitglieder, Gegenstände, Ausleihen, Kautionsbewegungen, Reservierungen — müssen
+zwischen Neustarts erhalten bleiben.
+Gleichzeitig darf die Inbetriebnahme keine Infrastruktur voraussetzen:
+Der Verein betreibt einen gewöhnlichen Vereinsrechner, keine Server.
+
+===== Optionen
+
+. SQLite (dateibasierte eingebettete Datenbank)
+. In-Memory-Store (keine Persistenz; nur für Tests geeignet)
+. PostgreSQL / MySQL (externe Datenbank)
+
+===== Pugh-Matrix
+
+[cols="4,1,1,1,1", options="header"]
+|===
+|Kriterium |Gewichtung |SQLite |In-Memory |PostgreSQL/MySQL
+
+|Einfache Inbetriebnahme — kein Setup
+|3
+|+++
+|+++
+|--
+
+|Keine externe Infrastruktur nötig
+|3
+|+++
+|+++
+|--
+
+|ACID-Transaktionen
+|2
+|+
+|--
+|+++
+
+|Testbarkeit (In-Memory-Implementierung injizierbar)
+|2
+|+
+|+++
+|+
+
+|Persistenz über Neustarts
+|3
+|+++
+|--
+|+++
+
+|*Gewichtete Summe*
+|
+|*30*
+|*9*
+|*15*
+|===
+
+Legende: +++ = voll erfüllt (3 Pkt.), + = teilweise (1 Pkt.), -- = nicht erfüllt (0 Pkt.)
+
+===== Entscheidung
+
+SQLite.
+
+Die Persistenz ist über `Repository`-Interfaces abstrahiert.
+Die SQLite-Implementierung wird per Dependency Injection eingesetzt.
+Für automatisierte Tests existiert eine zweite, In-Memory-Implementierung hinter demselben Interface.
+
+===== Konsequenzen
+
+* Ein einzelnes Datenbankschema in einer SQLite-Datei.
+  Kein Betrieb ohne Datei-Backup möglich — Vereinsrechner muss regelmäßig gesichert werden.
+* Alle Datenbankzugriffe laufen über Repository-Interfaces: kein direkter Datenbankaufruf
+  außerhalb der Infrastrukturschicht.
+* Tests können die In-Memory-Implementierung nutzen und laufen ohne Dateisystem.
+* Parallelzugriff ist kein Szenario (Einzel-Prozess, keine gleichzeitigen Nutzer),
+  daher ist SQLite's Write-Lock unproblematisch.
+
+---
+
+==== ADR-002: Kautionsberechnung als explizite Domänenfunktion
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Status
+|Akzeptiert
+
+|Datum
+|2026-08-11
+|===
+
+===== Kontext
+
+BR-004 definiert die Kautionsformel präzise:
+20 % des Wiederbeschaffungswerts, kaufmännisch gerundet auf ganze Euro,
+Minimum 5 €, Maximum 100 €.
+Das Qualitätsziel _Korrektheit der Kaution_ fordert eine Abweichung von exakt 0 Cent
+über alle Ausleihen (PRD: Qualitätsziele, QAS-01).
+Die Formel ist das kritischste Stück Logik im System: Fehler führen direkt zu
+finanziellem Schaden für Mitglieder.
+
+===== Optionen
+
+. Reine Funktion in der Domänenschicht
+. Berechnung per Datenbank-Trigger
+. Berechnung im API-Layer (Controller / Handler)
+
+===== Pugh-Matrix
+
+[cols="4,1,1,1,1", options="header"]
+|===
+|Kriterium |Gewichtung |Domänenfunktion |DB-Trigger |API-Layer
+
+|Testbarkeit ohne Infrastruktur
+|3
+|+++
+|--
+|+
+
+|Single Responsibility (SRP)
+|2
+|+++
+|--
+|--
+
+|Wiederverwendbarkeit über alle Schnittstellen (REST + CLI)
+|2
+|+++
+|--
+|--
+
+|DRY — ein einziger Ort für die Formel
+|2
+|+++
+|+
+|--
+
+|Nachvollziehbarkeit im Code
+|2
+|+++
+|--
+|+
+
+|*Gewichtete Summe*
+|
+|*33*
+|*3*
+|*6*
+|===
+
+Legende: +++ = voll erfüllt (3 Pkt.), + = teilweise (1 Pkt.), -- = nicht erfüllt (0 Pkt.)
+
+===== Entscheidung
+
+Reine Funktion `berechneKaution(wiederbeschaffungswertEuro: Int): Int` in der Domänenschicht.
+
+Die Funktion hat keine Seiteneffekte und keine Abhängigkeiten — sie nimmt einen Ganzbetrag
+und gibt einen Ganzbetrag zurück.
+Beide Grenzwerte (5 € und 100 €) sind innerhalb der Funktion explizit als benannte Konstanten
+definiert.
+
+===== Konsequenzen
+
+* Die Funktion ist durch Eigenschafts-Tests (Property-Based Testing) prüfbar:
+  Eingabe im Bereich 1–∞ → Ausgabe immer zwischen 5 und 100, stets 20 % gerundet.
+* Kein Weg durch das System legt eine Kaution an, ohne diese Funktion aufzurufen.
+* Änderungen an BR-004 betreffen exakt eine Funktion (≤ 1 Klasse/Funktion, QAS-06).
+* Datenbankschema speichert nur die berechnete Kaution — nicht den Wiederbeschaffungswert
+  zusammen mit der Prozentzahl.
+
+---
+
+==== ADR-003: On-Demand-Auswertung von Reservierungsverfall
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Status
+|Akzeptiert
+
+|Datum
+|2026-08-11
+|===
+
+===== Kontext
+
+Reservierungen verfallen nach drei Kalendertagen (BR-031).
+Der Verein öffnet dienstags und samstags — ein Background-Job oder Cron-Scheduler
+würde dauerhaft laufen, obwohl das System die restliche Woche unbenutzt ist.
+Ein Scheduler erfordert außerdem externe Infrastruktur (Systemd, Task Scheduler)
+oder eine eingebettete Scheduler-Bibliothek — beides widerspricht dem Rahmenbedingung
+_kein externer Dienst_ (PRD: Rahmenbedingungen).
+
+===== Optionen
+
+. On-Demand: Verfallsprüfung vor jedem betroffenen Request
+. Background-Job (Cron / eingebetteter Scheduler)
+. Explizit: Verfall nur durch Benutzeraktion (manueller Aufruf)
+
+===== Pugh-Matrix
+
+[cols="4,1,1,1,1", options="header"]
+|===
+|Kriterium |Gewichtung |On-Demand |Background-Job |Explizit
+
+|Keine externe Infrastruktur
+|3
+|+++
+|--
+|+++
+
+|Korrektheit — Verfall wird nicht übersehen
+|3
+|+++
+|+++
+|--
+
+|Geringe Implementierungskomplexität
+|2
+|+
+|--
+|+
+
+|Testbarkeit mit injizierter Datumsquelle
+|2
+|+++
+|+
+|+
+
+|*Gewichtete Summe*
+|
+|*28*
+|*12*
+|*16*
+|===
+
+Legende: +++ = voll erfüllt (3 Pkt.), + = teilweise (1 Pkt.), -- = nicht erfüllt (0 Pkt.)
+
+===== Entscheidung
+
+On-Demand-Auswertung.
+
+Vor jeder Verarbeitung von `POST /ausleihen`, `GET /gegenstaende` und `POST /vormerkungen`
+prüft das System alle aktiven Reservierungen der betroffenen Kategorie auf Verfall
+und löst die Warteschlange auf (UC-09-A).
+Die Datumsquelle ist injizierbar und damit in Tests kontrollierbar (REQ-09-06).
+
+===== Konsequenzen
+
+* Der On-Demand-Ablauf ist transaktional eingebettet in den auslösenden Request:
+  Entweder Verfall _und_ Folgeaktion sind persistiert oder keine der beiden.
+* Die Prüflogik läuft nur für die _betroffene Kategorie_, nicht für alle Kategorien —
+  der Aufwand pro Request ist konstant gering.
+* Das System muss auch dann korrekte Ergebnisse liefern, wenn es tagelang nicht
+  gestartet wurde: mehrere gleichzeitig verfallene Reservierungen werden in einer
+  Transaktion vollständig abgearbeitet (UC-09-A, E3).
+* Background-Jobs entfallen vollständig — keine Infrastruktur außerhalb der Applikation.
+
+---
+
+==== ADR-004: Sperre als abgeleiteter Zustand
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Status
+|Akzeptiert
+
+|Datum
+|2026-08-11
+|===
+
+===== Kontext
+
+BR-034 und BR-035 definieren die Sperre als Funktion über die Ausleihen eines Mitglieds:
+Ein Mitglied ist gesperrt, wenn mindestens eine seiner Ausleihen offen und überfällig ist.
+BR-036 definiert das automatische Ende der Sperre ohne explizite Entsperraktion.
+UC-09-B hält fest: _„Es gibt kein `gesperrt`-Attribut in der Datenbank und keinen
+Sperr- oder Entsperr-Vorgang."_
+
+===== Optionen
+
+. Abgeleiteter Zustand: `gesperrt = ∃ offene überfällige Ausleihe` (kein DB-Feld)
+. Persistiertes Boolean-Feld `mitglied.gesperrt`
+. Separate Sperrtabelle mit Zeitstempel und Aufhebungseintrag
+
+===== Pugh-Matrix
+
+[cols="4,1,1,1,1", options="header"]
+|===
+|Kriterium |Gewichtung |Abgeleitet |Persistiertes Boolean |Sperrtabelle
+
+|Konsistenz — kein Synchronisationsproblem
+|3
+|+++
+|--
+|--
+
+|Keine redundante Datenhaltung (Single Source of Truth)
+|3
+|+++
+|--
+|--
+
+|Testbarkeit (keine Zustandsmaschine, die außer Tritt geraten kann)
+|2
+|+++
+|+
+|+
+
+|Implementierungseinfachheit
+|2
+|+++
+|+++
+|+
+
+|Korrektheit bei gleichzeitiger Prüfungsabnahme (BR-036)
+|2
+|+++
+|--
+|--
+
+|*Gewichtete Summe*
+|
+|*36*
+|*12*
+|*9*
+|===
+
+Legende: +++ = voll erfüllt (3 Pkt.), + = teilweise (1 Pkt.), -- = nicht erfüllt (0 Pkt.)
+
+===== Entscheidung
+
+Abgeleiteter Zustand. Die Datenbank hat kein `gesperrt`-Feld.
+
+Die Formel lautet:
+
+----
+gesperrt = ∃ Ausleihe:
+    ausleihe.mitgliedId = mitgliedId
+    AND ausleihe.status = OFFEN
+    AND ausleihe.rueckgabeFrist < heute
+    AND gegenstand.status != IN_PRUEFUNG
+----
+
+Das Feld `gesperrt` in GET-Responses wird on-the-fly berechnet.
+Die Datumsquelle ist dieselbe injizierbare Quelle wie in ADR-003.
+
+===== Konsequenzen
+
+* Es gibt keinen Sperr-Endpunkt und keinen Entsperr-Endpunkt.
+  Das System kann nicht in einen inkonsistenten Zustand geraten,
+  bei dem `gesperrt = true` aber keine überfällige Ausleihe existiert.
+* Alle Stellen, die den Sperrstatus benötigen (Ausgabe, Verlängerung,
+  Reservierungsübergabe), rufen dieselbe Berechnungsfunktion auf.
+* Der Abschluss einer Prüfung (BR-016) setzt implizit die Sperre zurück —
+  ohne zusätzlichen Code-Pfad.
+* Abfragen auf `GET /mitglieder/{id}` liefern stets den aktuellen, zum Zeitpunkt
+  der Anfrage gültigen Sperrstatus.
+
+---
+
+==== ADR-005: Laufzeitumgebung und Framework-Stack
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Status
+|Akzeptiert
+
+|Datum
+|2026-08-24
+|===
+
+*Kontext*
+
+Die Programmiersprache und der Framework-Stack waren nach PRD frei wählbar.
+Die Entscheidung muss zu folgenden Anforderungen passen:
+Dependency Injection für IClock und Repositories, REST-API mit einheitlichem Fehlerformat,
+CLI-Kommandos (`leihgut pruefe`, `leihgut warte`, `leihgut einweise`),
+SQLite-Persistenz, Gherkin-Akzeptanztests.
+
+*Pugh-Matrix*
+
+[cols="3,1,1,1,1,1"]
+|===
+|Kriterium |Gewicht |NestJS + TypeScript |Spring Boot + Java |Express + TypeScript (plain)
+
+|DI-Container (IClock, Repositories)
+|3
+|++ (eingebaut)
+|++ (eingebaut)
+|-- (manuell)
+
+|SQLite + Drizzle ORM
+|2
+|++ (native Unterstützung)
+|○ (JDBC, kein Drizzle)
+|++ (native)
+
+|CLI-Integration im selben Prozess
+|2
+|+ (nestjs-commander)
+|+ (Spring Shell)
+|+ (commander.js)
+
+|Gherkin-Testintegration
+|2
+|+ (@cucumber/cucumber + Jest)
+|++ (Cucumber-JVM)
+|+ (@cucumber/cucumber)
+
+|Ökosystem-Reife
+|1
+|+
+|++
+|○
+
+|*Gewichtetes Ergebnis*
+|
+|*+14*
+|*+11*
+|*+6*
+|===
+
+*Entscheidung*
+
+NestJS mit TypeScript. Drizzle ORM für SQLite-Zugriff. Jest für Unit- und Integrationstests,
+`@cucumber/cucumber` für Gherkin-Akzeptanztests, `fast-check` für Property-based Tests.
+CLI wird über `nestjs-commander` im selben NestJS-Prozess implementiert.
+
+*Konsequenzen*
+
+* Sprache: TypeScript (strict mode)
+* HTTP: NestJS auf Express-Adapter (Standard)
+* Persistenz: Drizzle ORM + `better-sqlite3` (ADR-001 konkretisiert)
+* Test: Jest + Supertest + @cucumber/cucumber + fast-check
+* CLI: nestjs-commander (NestJS-Module, teilt DI-Container mit REST-API)
+* IClock wird als NestJS-Provider injiziert; `FixedClock` als Test-Provider

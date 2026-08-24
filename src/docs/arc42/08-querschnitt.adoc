@@ -1,0 +1,199 @@
+=== Kapitel 8: Querschnittliche Konzepte
+
+==== 8.1 Bedrohungsmodell (STRIDE)
+
+Das System arbeitet ohne kryptographische Authentifizierung (BR-039).
+Rollen werden über Header und CLI-Flags mitgeteilt und nicht geprüft.
+Das Bedrohungsmodell hält fest, welche Risiken daraus entstehen und welche davon akzeptiert werden.
+
+[cols="1,2,4,3"]
+|===
+|ID |STRIDE-Kategorie |Bedrohung |Betroffene Komponente
+
+|T-001
+|Spoofing
+|Ein Aufrufer gibt im HTTP-Header `X-Rolle` eine fremde Rolle (z. B. `thekendienst` statt `mitglied`) an und erhält dadurch unberechtigten Zugriff auf Endpunkte.
+|REST API
+
+|T-002
+|Tampering
+|Eine Kautionsbewegung oder ein Ausleihe-Datensatz wird direkt in der SQLite-Datei manipuliert, ohne den Audit-Log zu durchlaufen.
+|Persistenz (leihgut.db)
+
+|T-003
+|Repudiation
+|Der Wart bestreitet, einen Kautionsabzug vorgenommen zu haben; ohne unveränderliches Log lässt sich der Vorgang nicht belegen.
+|Audit-Log
+
+|T-004
+|Information Disclosure
+|Ein Aufrufer mit der Rolle `mitglied` liest Ausleihdaten oder Kautionsbewegungen eines anderen Mitglieds über die REST API.
+|REST API
+
+|T-005
+|Denial of Service
+|Ein Aufrufer flutet das System mit Ausleihanfragen und blockiert damit den einzigen Prozess für legitime Thekendienst-Anfragen.
+|REST API
+
+|T-006
+|Elevation of Privilege
+|Ein Aufrufer mit der Rolle `mitglied` ruft einen Endpunkt auf, der nur für `thekendienst` oder `wart` erlaubt ist (z. B. `POST /ausleihen`).
+|REST API
+
+|T-007
+|Spoofing
+|Ein CLI-Kommando wird ohne das erforderliche `--rolle wart`-Flag aufgerufen und führt dennoch Wart-Operationen aus.
+|CLI
+
+|T-008
+|Tampering
+|Das Systemdatum des Vereins-Rechners wird manipuliert, um Rückgabefristen hinauszuschieben oder Reservierungsverfälle zu vermeiden.
+|UhrService (DateSource)
+|===
+
+==== 8.2 Sicherheitskonzept
+
+Für jede Bedrohung aus dem Modell wird entweder eine Maßnahme benannt oder das Restrisiko begründet akzeptiert.
+
+[cols="1,4,2"]
+|===
+|Maßnahme |Beschreibung |Schließt Bedrohung
+
+|Rollenprüfung am Eintrittspunkt
+|Jeder REST-Endpunkt und jedes CLI-Kommando prüft den Wert des `X-Rolle`-Headers bzw. des `--rolle`-Flags als ersten Schritt, bevor irgendein Domänencode ausgeführt wird.
+Ein ungültiger oder unzureichender Rollenwert führt sofort zu HTTP 403 bzw. Exit-Code 1.
+|T-001, T-006, T-007
+
+|Einweisungsprüfung in der Domänenschicht
+|Die Prüfung, ob ein Mitglied für eine einweisungspflichtige Kategorie eine dokumentierte Einweisung besitzt, erfolgt in der Domänenschicht, nicht im Controller (UC-01, BR-010).
+Die Prüfung greift unabhängig davon, über welche Schnittstelle der Aufruf kommt.
+|T-001 (partiell)
+
+|Append-only Audit-Log
+|Der Audit-Log kennt keinen DELETE-Endpunkt und keine UPDATE-Operation auf bestehenden Einträgen.
+Kautionsbewegungen und Zustandswechsel werden ausschließlich geschrieben, niemals geändert oder gelöscht (Audit-Log-Spec, BR-022).
+|T-003
+
+|Restrisiko T-002 — akzeptiert
+|Direktzugriff auf die SQLite-Datei ist in einem vereinsinternen System ohne Mehrbenutzerbetrieb ein akzeptiertes Restrisiko.
+Mitigationshinweis: Das Backup (manuelle Kopie der Datei) ermöglicht nachträgliche Überprüfung.
+|—
+
+|Restrisiko T-004 — akzeptiert
+|Das System unterscheidet in der REST-API nicht zwischen den Daten verschiedener Mitglieder auf Objektebene.
+Da kein echtes Login existiert und das System im Vereinsnetz läuft, ist dieser Datenschutzaspekt ein bewusstes Nicht-Ziel von Release 1.
+|—
+
+|Restrisiko T-005 — akzeptiert
+|Rate-Limiting und Überlastschutz sind für ein vereinsinternes System ohne Internetexposition nicht verhältnismäßig.
+Der Dienst ist nicht aus dem öffentlichen Netz erreichbar.
+|—
+
+|Restrisiko T-008 — akzeptiert
+|Das Systemdatum liegt im Einflussbereich des Vereins-Rechners, nicht des Leihgut-Systems.
+Die `DateSource`-Abstraktion (UC-09, REQ-09-06) stellt sicher, dass Tests mit festem Datum laufen; im Produktivbetrieb wird `SystemDateSource` verwendet, die `LocalDate.now()` delegiert.
+|—
+|===
+
+==== 8.3 Testkonzept
+
+Das Testkonzept folgt der Testpyramide. Jeder Test benennt seine Use-Case-ID (z. B. als Annotation `@UseCaseRef("UC-01")`) und, wo zutreffend, die Geschäftsregel-ID. Jede Geschäftsregel BR-001 bis BR-042 muss durch mindestens ein Gherkin-Szenario abgedeckt sein.
+
+===== Testpyramide
+
+[cols="2,3,3"]
+|===
+|Ebene |Inhalt |Beispiele
+
+|Unit Tests
+|Domänenobjekte und isolierte Berechnungen, die keine I/O-Abhängigkeiten haben.
+|Kautionsformel (BR-004): Grenzwerte 5 EUR / 100 EUR, kaufmännisches Runden; Überfälligkeitscheck (BR-034, BR-035); Nutzungszähler-Inkrement (BR-023, BR-024).
+
+|Integration Tests
+|Use-Case-Handler gegen In-Memory-Repositories. Kein Netzwerk, keine echte Datenbank.
+|UC-02 Ausgabe: alle Ausgabebedingungen (BR-007 bis BR-011) in Kombination; UC-09-A Reservierungsverfall mit `FixedDateSource`.
+
+|Akzeptanztests
+|Gherkin-Szenarien aus der Spezifikation gegen das laufende System (echte SQLite-Datei, echter HTTP-Port).
+|Alle Szenarien aus den Use-Case-Specs und der Audit-Log-Spec; jedes Szenario referenziert seinen UC-Code.
+
+|Eigenschaftstests (Property-based)
+|Invarianten über Wertebereiche hinweg: Eingaben werden zufällig gewählt, das Ergebnis wird gegen eine Eigenschaft geprüft, nicht gegen einen Fixwert.
+|Kautionsberechnung: Für alle Wiederbeschaffungswerte von 1 bis 10 000 EUR gilt stets `5 ≤ kaution ≤ 100` (BR-004). Nutzungszähler: Der Zähler ist nach n abgeschlossenen Ausleihen genau n (BR-023).
+|===
+
+===== Datumsquelle in Tests
+
+Alle Fristenberechnungen und Überfälligkeitsprüfungen nutzen die injizierbare `DateSource`-Schnittstelle (UC-09, REQ-09-06).
+Tests injizieren eine `FixedDateSource` mit einem konfigurierten Datum.
+Direktaufrufe von `LocalDate.now()`, `Date.now()` oder Äquivalenten außerhalb der `SystemDateSource`-Implementierung sind im Review-Prozess explizit verboten.
+
+===== Traceability
+
+[cols="2,5"]
+|===
+|Pflicht |Durchsetzung
+
+|Jeder Test nennt seine Use-Case-ID
+|Annotation oder Kommentar `@UseCaseRef("UC-XX")` ist Bestandteil der Definition of Done (PRD).
+
+|Jede BR ist durch Gherkin abgedeckt
+|Die Akzeptanztest-Suite enthält für jede BR-001…BR-042 mindestens ein Szenario.
+Fehlende Abdeckung ist ein offenes Issue, das den Merge blockiert.
+|===
+
+==== 8.4 Observability
+
+Das System ist ein vereinsinternes Werkzeug ohne Monitoring-Infrastruktur.
+Das Observability-Konzept beschränkt sich auf Logs und den Audit-Trail; Metriken und Traces sind nicht verhältnismäßig.
+
+[cols="2,5"]
+|===
+|Ebene |Maßnahme
+
+|Logs
+|Strukturiertes Logging (JSON) für jeden eingehenden Request: HTTP-Methode, Pfad, `X-Rolle`-Wert, HTTP-Status-Code, Antwortdauer in Millisekunden. Logs werden auf stdout/stderr des Prozesses geschrieben; das Betriebssystem leitet sie in eine Datei um, wenn gewünscht.
+
+|Metriken
+|Keine. Die Vereinsgröße (≈ 400 Gegenstände, ≈ 800 Mitglieder) rechtfertigt kein Monitoring-System.
+
+|Traces
+|Keine. Der Prozess hat keine externen Abhängigkeiten; ein Trace über Systemgrenzen hinweg entsteht nicht.
+
+|Audit-Trail
+|Kautionsbewegungen (`HINTERLEGUNG`, `ABZUG`, `FREIGABE`) und Zustandswechsel von Gegenständen werden unveränderlich in der Datenbank persistiert (BR-022, Audit-Log-Spec). Der Trail ist über `GET /audit`, `GET /ausleihen/{id}/kautionsbewegungen` und `GET /gegenstaende/{inventarnummer}/zustandswechsel` abrufbar.
+|===
+
+==== 8.5 Fehlerbehandlung
+
+Das System hat keine externen Abhängigkeiten; Retry, Circuit Breaker und Fallback-Strategien entfallen.
+Jede schreibende Operation ist atomar: Entweder werden alle Seiteneffekte einer Operation (Zustandswechsel des Gegenstands, Kautionsbewegung, Audit-Einträge) zusammen persistiert, oder kein einziger.
+
+[cols="2,5"]
+|===
+|Fehlerkategorie |Strategie
+
+|Validierungsfehler (HTTP 400)
+|Eingabe verletzt ein Formatkonstraint (fehlender Pflichtparameter, ungültiges Datum, negativer Betrag).
+Das System weist die Anfrage sofort ab, bevor Domänencode ausgeführt wird.
+Kein Seiteneffekt entsteht.
+Antwortformat: einheitliches JSON-Fehlerobjekt mit den Feldern `fehlercode` und `nachricht`.
+
+|Domänenfehler (HTTP 403, 404, 409)
+|Die Eingabe ist formal korrekt, aber ein fachliches Prädikat ist nicht erfüllt (z. B. Gegenstand nicht verfügbar, Mitglied gesperrt, Einweisung fehlt).
+Die Domänenschicht wirft eine typisierte Exception; der API-Layer übersetzt sie in den passenden HTTP-Status.
+Kein Seiteneffekt entsteht.
+
+|CLI-Fehler
+|Unbekannte Kommandos, fehlende Pflichtargumente oder Domänenfehler auf der CLI-Ebene schreiben die Fehlermeldung nach stderr und beenden den Prozess mit Exit-Code 1.
+
+|Persistenzfehler (HTTP 500)
+|Schlägt ein Datenbankzugriff fehl (z. B. Datei nicht beschreibbar), loggt das System den Fehler strukturiert und antwortet mit HTTP 500.
+Kein Retry, kein Circuit Breaker.
+Der Betreiber muss den Fehler manuell beheben (z. B. Dateisystemberechtigungen prüfen, Prozess neu starten).
+
+|Transaktionsatomarität
+|Jede schreibende Operation (Ausgabe, Rückgabe, Prüfung, Wartungsabschluss) ist in einer Datenbanktransaktion gekapselt.
+Schlägt ein Schritt innerhalb der Operation fehl, wird die gesamte Transaktion zurückgerollt.
+Das System erreicht damit Zustand S₀ wieder, als wäre die Operation nie aufgerufen worden.
+|===

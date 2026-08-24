@@ -1,0 +1,153 @@
+=== Laufzeitsicht
+
+Die Laufzeitsicht zeigt zwei repräsentative Szenarien als Sequenzdiagramme:
+Gegenstand ausleihen (UC-01, Happy Path) und Prüfung abschließen (UC-04, Ergebnis SCHADEN).
+
+==== Szenario: Gegenstand ausleihen (UC-01, Happy Path)
+
+Der Thekendienst gibt einen verfügbaren Gegenstand an ein berechtigtes Mitglied aus.
+Alle Vorbedingungen sind erfüllt; die Ausleihe wird atomar angelegt.
+
+[plantuml]
+----
+@startuml
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 200
+
+actor       "Thekendienst\n(Karim)"          as client
+participant "REST API"                        as api
+participant "AusleiheService"                 as svc
+participant "IMitgliedRepository"             as mrepo
+participant "IGegenstandRepository"           as grepo
+participant "IAusleiheRepository"             as arepo
+participant "IVormerkungRepository"           as vrepo
+participant "IAuditRepository"                as audit
+
+== UC-01: Gegenstand ausleihen ==
+
+client -> api : POST /ausleihen\n{ mitgliedId, inventarnummer }\nX-Rolle: thekendienst
+
+api -> api : Rolle aus X-Rolle-Header lesen\n→ THEKENDIENST (BR-039)
+
+api -> svc : ausleihen(mitgliedId, inventarnummer, rolle)
+
+svc -> mrepo : findById(mitgliedId)
+mrepo --> svc : Mitglied (oder nicht gefunden → 404)
+
+svc -> grepo : findByInventarnummer(inventarnummer)
+grepo --> svc : Gegenstand (oder nicht gefunden → 404)
+
+svc -> svc : Prüfung: Gegenstand.status = VERFUEGBAR\noder (RESERVIERT und Reservierung.mitgliedId = mitgliedId)?\n→ sonst 409 GEGENSTAND_NICHT_VERFUEGBAR (BR-007)
+
+svc -> svc : Prüfung: Mitglied nicht gesperrt?\n(mind. eine Ausleihe überfällig → 409 MITGLIED_GESPERRT)\n(BR-009, BR-034, BR-035)
+
+svc -> arepo : countOffeneAusleihen(mitgliedId)
+arepo --> svc : Anzahl
+
+svc -> svc : Prüfung: Anzahl < 3?\n→ sonst 409 MAX_AUSLEIHEN_ERREICHT (BR-008)
+
+svc -> svc : Prüfung: Kategorie einweisungspflichtig?\n→ Einweisung für Mitglied und Kategorie vorhanden?\n→ sonst 409 EINWEISUNG_FEHLT (BR-010)
+
+svc -> arepo : create(Ausleihe{\n  mitgliedId, inventarnummer,\n  status=OFFEN,\n  ausgabeDatum=heute,\n  rueckgabeFrist=heute+leihdauerTage,\n  verlaengert=false })
+arepo --> svc : Ausleihe (mit generierter ID)
+
+svc -> grepo : setStatus(inventarnummer, AUSGELIEHEN)
+
+svc -> svc : Kaution berechnen:\n  20 % von Wiederbeschaffungswert,\n  kaufm. gerundet, min 5, max 100 EUR (BR-004, BR-011)
+
+svc -> audit : kautionsbewegung({\n  typ=HINTERLEGUNG,\n  ausleiheId, betrag, zeitstempel=jetzt })\n(BR-020, BR-022)
+
+svc -> vrepo : findAktivaReservierung(inventarnummer)
+vrepo --> svc : Reservierung (falls vorhanden)
+
+alt Gegenstand war RESERVIERT
+    svc -> vrepo : setReservierungStatus(ABGEHOLT)
+end
+
+svc --> api : AusleiheErgebnis { ausleiheId, rueckgabeFrist, kautionsbetrag }
+
+api --> client : 201 Created\n{ ausleiheId, rueckgabeFrist, kautionsbetrag }
+
+@enduml
+----
+
+==== Szenario: Prüfung abschließen (UC-04, Ergebnis SCHADEN)
+
+Der Wart schließt eine Prüfung mit einem Kautionsabzug ab.
+Der Gegenstand hat die Ausleihe überlebt, das Wartungsintervall ist noch nicht erreicht,
+eine Vormerkung liegt vor — der Gegenstand wird für das nächste Mitglied der Warteschlange reserviert.
+
+[plantuml]
+----
+@startuml
+skinparam sequenceMessageAlign left
+skinparam responseMessageBelowArrow true
+skinparam maxMessageSize 200
+
+actor       "Wart\n(Rolf)"                    as wart
+participant "CLI"                              as cli
+participant "PruefungService"                  as svc
+participant "IAusleiheRepository"              as arepo
+participant "IGegenstandRepository"            as grepo
+participant "VormerkungService"                as vsvc
+participant "IVormerkungRepository"            as vrepo
+participant "IAuditRepository"                 as audit
+
+== UC-04: Prüfung abschließen — Ergebnis SCHADEN ==
+
+wart -> cli : leihgut pruefe AU-123\n  --ergebnis SCHADEN\n  --abzug 1000\n  --rolle wart
+
+cli -> cli : Rolle aus --rolle-Flag lesen → WART (BR-042)
+
+cli -> svc : pruefe(ausleiheId="AU-123", ergebnis=SCHADEN,\n        abzugCent=1000, notiz=null, rolle=WART)
+
+svc -> arepo : findById("AU-123")
+arepo --> svc : Ausleihe { status=OFFEN, gegenstandId, mitgliedId,\n              kautionCent=hinterlegteBetrag }
+
+svc -> svc : Validierung: Ausleihe.status = OFFEN?\n→ sonst Fehler "Ausleihe bereits abgeschlossen" (stderr, Exit 1)
+
+svc -> grepo : findByInventarnummer(gegenstandId)
+grepo --> svc : Gegenstand { status=IN_PRUEFUNG, nutzungszaehler,\n               kategorieId, wartungsintervall }
+
+svc -> svc : Validierung: Gegenstand.status = IN_PRUEFUNG?\n→ sonst Fehler "Gegenstand nicht in Prüfung" (stderr, Exit 1)
+
+svc -> svc : Validierung: abzug (1000) <= hinterlegteKaution?\n→ sonst ABZUG_UEBERSTEIGT_KAUTION (stderr, Exit 1) (BR-021)
+
+svc -> arepo : savePruefprotokoll({\n  ausleiheId, ergebnis=SCHADEN,\n  abzugCent=1000, notiz, erstelltAm=heute })
+
+svc -> grepo : incrementNutzungszaehler(gegenstandId)
+note right: nutzungszaehler += 1 (BR-023)
+
+svc -> audit : kautionsbewegung({\n  typ=ABZUG, ausleiheId,\n  betrag=1000, zeitstempel=jetzt })\n(BR-020, BR-021, BR-022)
+
+svc -> audit : kautionsbewegung({\n  typ=FREIGABE, ausleiheId,\n  betrag=hinterlegteBetrag−1000,\n  zeitstempel=jetzt })\n(sofern Restbetrag > 0, BR-020, BR-022)
+
+svc -> arepo : setStatus("AU-123", ABGESCHLOSSEN)
+note right: BR-016
+
+svc -> svc : Folgezustand bestimmen:\n  nutzungszaehlerNeu < wartungsintervall\n  → nicht WARTUNGSFAELLIG (BR-024)
+
+svc -> vsvc : bestimmeGegenstandFolgestatus(gegenstandId, kategorieId)
+
+vsvc -> vrepo : findErsteOffeneVormerkung(kategorieId)
+vrepo --> vsvc : Vormerkung { mitgliedId="M-042", ... }
+
+vsvc -> vsvc : Mitglied M-042 gesperrt? → nein (BR-033, BR-034)
+
+vsvc -> vrepo : createReservierung({\n  inventarnummer=gegenstandId,\n  mitgliedId="M-042",\n  verfall=heute+3Tage })\n(BR-029, BR-031)
+
+vsvc -> vrepo : setVormerkungStatus("M-042", RESERVIERT)
+
+vsvc -> grepo : setStatus(gegenstandId, RESERVIERT)
+
+vsvc --> svc : RESERVIERT (Reservierung erstellt für M-042)
+
+svc -> audit : zustandswechsel({\n  inventarnummer=gegenstandId,\n  vonStatus=IN_PRUEFUNG,\n  nachStatus=RESERVIERT,\n  zeitstempel=jetzt,\n  ausloeser="Prüfprotokoll AU-123" })\n(BR-022)
+
+svc --> cli : PruefungErgebnis { ausleiheId, gegenstandStatus=RESERVIERT,\n                   nutzungszaehler, abzug, freigabe,\n                   reservierung={ mitgliedId, verfall } }
+
+cli -> wart : stdout:\nPrüfung abgeschlossen.\nAusleihe:       AU-123 → ABGESCHLOSSEN\nGegenstand:     INV-007 → RESERVIERT\nNutzungszähler: 4 / 10\nKaution:        Abzug 10,00 EUR | Freigabe 15,00 EUR\nReservierung:   INV-007 für Mitglied M-042 (gültig bis YYYY-MM-DD)
+
+@enduml
+----

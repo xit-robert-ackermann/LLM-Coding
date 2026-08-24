@@ -1,0 +1,81 @@
+=== Einführung und Ziele
+
+==== Aufgabenstellung
+
+*Leihgut* ist das Verwaltungssystem für den Werkzeugverleih des Vereins „Bibliothek der Dinge".
+Der Verein verleiht rund vierhundert Gegenstände — Bohrhammer, Beamer, Lastenrad, Kettensäge, Nähmaschine — an achthundert Mitglieder.
+Das System ersetzt ein Ringbuch und Bar-Kaution durch eine REST-API mit begleitender CLI.
+
+Der Thekendienst ist ehrenamtlich besetzt und wechselt jede Schicht.
+Er braucht in dreißig Sekunden eine eindeutige Aussage darüber, ob ein Gegenstand herausgegeben werden darf, und soll die Kaution nicht im Kopf ausrechnen müssen.
+Der Wart prüft Gegenstände nach der Rückgabe — oft Tage später — und entscheidet allein über Kautionsabzüge.
+Mitglieder können Gegenstände vormerken, ohne an der Theke zu erscheinen.
+
+Das System bildet genau einen fachlichen Kern ab: den Weg eines Gegenstands von der Ausgabe über die Rückgabe und Prüfung bis zur erneuten Verfügbarkeit, mit allen Bedingungen für Ausleihe, Verlängerung, Kaution, Wartung und Reservierung.
+Kassenführung, Mitgliederverwaltung und Benachrichtigungen liegen außerhalb dieses Systems.
+
+==== Qualitätsziele
+
+Die folgenden fünf Qualitätsziele sind verbindlich.
+Sie werden in <<10-qualitaetsanforderungen.adoc#,Kapitel 10>> als vollständige Quality Attribute Scenarios ausformuliert.
+
+[cols="1,2,3,2", options="header"]
+|===
+|Prio |Qualitätsmerkmal (ISO 25010) |Szenario |Response Measure
+
+|1
+|Funktionale Korrektheit +
+(Functional Suitability)
+|Für ein Mitglied mit 50 abgeschlossenen Ausleihen wird der Kautionssaldo aus den protokollierten Kautionsbewegungen nachgerechnet.
+|Abweichung: 0 Cent.
+
+|2
+|Sicherheit +
+(Security)
+|Ein Mitglied ohne dokumentierte Einweisung versucht über alle verfügbaren Schnittstellen, ein einweisungspflichtiges Gerät auszuleihen.
+|Kein Aufruf führt zur Ausgabe. Nachgewiesen durch je einen automatisierten Test pro Schnittstelle.
+
+|3
+|Nachvollziehbarkeit +
+(Maintainability / Auditability)
+|Der Wart schließt eine Prüfung mit Kautionsabzug ab.
+|Der Vorgang erzeugt einen Audit-Eintrag mit Zeitstempel, Betrag, Auslöser und Verweis auf das Prüfprotokoll.
+
+|4
+|Zeitverhalten +
+(Performance Efficiency)
+|Der Thekendienst prüft die Ausgabefähigkeit eines Gegenstands bei 400 Gegenständen und 800 Mitgliedern im Datenbestand.
+|Antwort in unter 300 ms, gemessen am 95. Perzentil über 100 aufeinanderfolgende Aufrufe.
+
+|5
+|Wartbarkeit +
+(Maintainability)
+|Ein neuer Thekendienst-Freiwilliger übernimmt eine Schicht, ohne das System zu kennen.
+|Die Schicht kann ohne Schulung durchgeführt werden; alle fachlich relevanten Fehlermeldungen sind deutschsprachig und selbsterklärend.
+|===
+
+Verfügbarkeit ist kein Qualitätsziel.
+Der Verein öffnet zweimal pro Woche; ein Ausfall dazwischen ist betrieblich folgenlos.
+
+==== Stakeholder
+
+[cols="2,2,4", options="header"]
+|===
+|Rolle |Persona |Erwartung ans System
+
+|Thekendienst
+|Karim
+|Sofortige Aussage über Ausgabefähigkeit (inkl. Sperre, Einweisung, Wartungsstatus). Kautionsbetrag ohne eigene Berechnung. Rückgabe mit einem Klick erfassen. Unter 30 Sekunden pro Vorgang.
+
+|Mitglied
+|Sabine
+|Verfügbarkeit abfragen. Vormerken, wenn ein Gegenstand gerade nicht frei ist. Reservierung rechtzeitig erhalten, bevor sie verfällt.
+
+|Werkstattwart
+|Rolf
+|Arbeitsliste aller zurückgegebenen, noch nicht geprüften Ausleihen. Prüfprotokoll mit Kautionsabzug dokumentieren. Wartung abschließen und Nutzungszähler zurücksetzen. Einweisungen anlegen.
+
+|Vereinsvorstand
+|(anonym)
+|Null ungeklärte Kautionsdifferenzen. Vollständiges Audit-Log für alle Kautionsbewegungen und Zustandswechsel. Kein Gegenstand geht aus dem Haus, wenn er wartungsfällig ist oder eine Einweisung fehlt.
+|===

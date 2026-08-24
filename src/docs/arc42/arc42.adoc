@@ -1,0 +1,58 @@
+= Architekturdokumentation: Leihgut
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+
+Dieses Dokument folgt dem arc42-Template.
+Grundlage: link:../specs/prd.adoc[PRD Leihgut] und link:../specs/spec.adoc[Spezifikation Leihgut].
+
+== Einführung und Ziele
+
+include::01-einfuehrung-ziele.adoc[leveloffset=+1]
+
+== Randbedingungen
+
+include::02-randbedingungen.adoc[leveloffset=+1]
+
+== Kontextabgrenzung
+
+include::03-kontextabgrenzung.adoc[leveloffset=+1]
+
+== Lösungsstrategie
+
+include::04-loesungsstrategie.adoc[leveloffset=+1]
+
+== Bausteinsicht
+
+include::05-bausteinsicht.adoc[leveloffset=+1]
+
+== Laufzeitsicht
+
+include::06-laufzeitsicht.adoc[leveloffset=+1]
+
+== Verteilungssicht
+
+include::07-verteilungssicht.adoc[leveloffset=+1]
+
+== Querschnittliche Konzepte
+
+include::08-querschnitt.adoc[leveloffset=+1]
+
+== Architekturentscheidungen
+
+include::09-entscheidungen.adoc[leveloffset=+1]
+
+== Qualitätsanforderungen
+
+include::10-qualitaet.adoc[leveloffset=+1]
+
+== Risiken und technische Schulden
+
+include::11-risiken.adoc[leveloffset=+1]
+
+== Glossar
+
+include::12-glossar.adoc[leveloffset=+1]

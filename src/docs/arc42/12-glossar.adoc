@@ -1,0 +1,109 @@
+=== Glossar
+
+Dieses Glossar definiert die verbindliche Sprache des Systems.
+Fachbegriffe (12.1) werden wortgleich aus dem PRD-Glossar übernommen — sie gelten unverändert in Spezifikation, Architektur und Code (Ubiquitous Language).
+Technische Begriffe (12.2) ergänzen das Vokabular der Architekturschichten.
+
+==== 12.1 Fachbegriffe
+
+[cols="2,5", options="header"]
+|===
+|Begriff |Definition
+
+|Gegenstand
+|Ein einzelnes physisches Exemplar mit eigener Inventarnummer.
+
+|Kategorie
+|Gruppe gleichartiger Gegenstände. Bestimmt Leihdauer, Wartungsintervall und Einweisungspflicht.
+
+|Mitglied
+|Person, die ausleihen darf.
+
+|Thekendienst
+|Rolle, die Gegenstände ausgibt und zurücknimmt.
+
+|Wart
+|Rolle, die prüft, wartet, ausmustert und über Kautionsabzüge entscheidet.
+
+|Ausleihe
+|Vorgang von der Ausgabe bis zum Abschluss der Prüfung.
+
+|Rückgabe
+|Übergabe des Gegenstands an die Theke. Beendet die Ausleihe nicht.
+
+|Prüfung
+|Kontrolle des Gegenstands nach der Rückgabe.
+
+|Prüfprotokoll
+|Ergebnis einer Prüfung. Schließt die Ausleihe ab.
+
+|Kaution
+|Bei der Ausgabe hinterlegter Betrag. Keine Gebühr.
+
+|Wiederbeschaffungswert
+|Preis für ein gleichwertiges Ersatzgerät.
+
+|Nutzungszähler
+|Zahl der abgeschlossenen Ausleihen seit der letzten Wartung.
+
+|Wartungsfällig
+|Zustand, in dem ein Gegenstand nicht ausgegeben und nicht reserviert wird.
+
+|Ausgemustert
+|Endzustand eines Gegenstands. Verloren oder irreparabel.
+
+|Vormerkung
+|Platz in der Warteschlange einer Kategorie.
+
+|Reservierung
+|Einem Mitglied für drei Kalendertage zugeordneter Gegenstand.
+
+|Einweisung
+|Dokumentierte Unterweisung einer Person für eine Kategorie.
+
+|Sperre
+|Zustand eines Mitglieds mit überfälliger Ausleihe.
+|===
+
+==== 12.2 Technische Begriffe
+
+[cols="2,5", options="header"]
+|===
+|Begriff |Definition
+
+|DateSource
+|Interface für die Datumsquelle. Produktiv: `SystemDateSource`, liefert das aktuelle Systemdatum. In Tests: `FixedDateSource` mit konfigurierbarem Datum. Stellt sicher, dass alle Fristberechnungen testbar bleiben (PRD: „austauschbare Datumsquelle", UC-09).
+
+|Repository
+|Interface für den Datenzugriff auf ein Aggregat. Isoliert die Domänenschicht von der Persistenztechnologie. Implementierungen für SQLite liegen in der Infrastrukturschicht; Tests können In-Memory-Implementierungen einsetzen.
+
+|Use-Case-Handler
+|Klasse in der Anwendungsschicht, die genau einen Use Case implementiert (Single Responsibility Principle). Orchestriert Domänenobjekte und Repositories, enthält selbst keine Geschäftslogik.
+
+|ADR
+|Architecture Decision Record nach Nygard. Dokumentiert eine Architekturentscheidung mit Kontext, getroffener Entscheidung und Konsequenzen. ADR-IDs werden in Risiken und Technischen Schulden referenziert.
+
+|EARS
+|Easy Approach to Requirements Syntax. Schablone für atomare Anforderungen: _When / While / If … the system shall …_ Wird in der Spezifikation für einzelne Systemanforderungen verwendet.
+
+|BR-ID
+|Business Rule Identifier (BR-001 … BR-042). Stabile ID für eine atomare Geschäftsregel aus `br.adoc`. Tests und Use Cases referenzieren BR-IDs für Rückverfolgbarkeit.
+
+|On-Demand-Prüfung
+|Strategie, bei der zeitbasierte Auswertungen — Reservierungsverfall (BR-031), Überfälligkeit (BR-035), Sperren (BR-034) — nicht durch einen Hintergrunddienst, sondern beim nächsten relevanten Request ausgeführt werden. Vermeidet laufende Prozesse; erzeugt kurze Inkonsistenzfenster (R-003, ADR-003).
+
+|Ubiquitous Language
+|Gemeinsames Vokabular aus dem PRD-Glossar, das unverändert in Code, Tests und Dokumentation gilt (Domain-Driven Design). Abweichende Benennung im Code gilt als Defekt.
+
+|NestJS
+|Node.js-Framework mit eingebautem DI-Container, Modul-System und Express-Adapter. Laufzeitumgebung für REST-API und CLI (über nestjs-commander).
+
+|Drizzle ORM
+|Typsicheres TypeScript-Query-Building für SQLite. Schema-first: Tabellenstruktur in TypeScript definiert, Migrations-Files generiert. Kein Runtime-Overhead durch Reflection.
+
+|nestjs-commander
+|NestJS-Modul, das CLI-Kommandos als NestJS-Commands implementiert und den gemeinsamen DI-Container mit der REST-API teilt. Ermöglicht `leihgut pruefe`, `leihgut warte`, `leihgut einweise` im selben Prozess.
+
+|FixedDateSource
+|Test-Implementierung von `DateSource`, die ein konfigurierbares Datum zurückgibt. Erlaubt deterministisches Testen von Fristen, Überfälligkeit und Reservierungsverfall ohne Systemzeit-Abhängigkeit.
+|===

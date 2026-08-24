@@ -1,0 +1,144 @@
+=== Lösungsstrategie
+
+Die folgenden Entscheidungen legen die tragenden Linien der Architektur fest.
+Jede Aussage nennt den Grund — nicht nur das Was, sondern das Warum.
+
+==== Technologieentscheidungen
+
+[cols="1,2,3"]
+|===
+|Entscheidung |Gewählt |Begründung
+
+|Programmiersprache + Framework
+|TypeScript + NestJS (ADR-005)
+|NestJS liefert DI-Container, Module-System und HTTP-Server in einem.
+TypeScript strict mode verhindert Laufzeitfehler in der Kautionslogik.
+
+|Persistenz
+|SQLite + Drizzle ORM (ADR-001, ADR-005)
+|SQLite: lokal, kein externer Dienst, ACID-Transaktionen.
+Drizzle: typsicheres Query-Building, kein Runtime-Overhead, schema-first Migration.
+
+|API-Stil
+|REST / JSON
+|Einfach testbar mit Standard-HTTP-Clients, kein Framework-Lock-in auf Client-Seite.
+Karim nutzt Postman; automatisierte Tests laufen gegen denselben Endpunkt.
+
+|CLI-Werkzeug
+|Natives CLI-Binary (`leihgut`)
+|Rolf arbeitet im Terminal.
+Das CLI ist die einzige Schnittstelle für Prüfung, Wartung und Einweisung — eine separate Oberfläche würde keinen Mehrwert bringen.
+
+|Fehlerschema
+|Einheitliches JSON-Objekt (`fehlercode` / `nachricht` / `details`) für REST; `FEHLER [CODE]: ...` auf stderr für CLI
+|Maschinenlesbare Fehlercodes ermöglichen stabile Client-Tests. Einheitlichkeit verhindert Sonderfälle in der Fehlerbehandlung.
+
+|Testframework
+|Jest + Supertest + @cucumber/cucumber + fast-check (ADR-005)
+|Jest: NestJS-Default, `@nestjs/testing` für DI in Tests.
+Supertest: HTTP-Tests gegen TestModule.
+Cucumber: Gherkin-Szenarien aus der Spec direkt ausführbar.
+fast-check: Invarianten für Kautionsformel und Nutzungszähler.
+
+|Datumsquelle
+|Austauschbares Clock-Interface
+|Fristen (Rückgabefrist, Reservierungsverfall, Überfälligkeit) müssen in Tests kontrollierbar sein.
+Eine fest verdrahtete `LocalDate.now()`-Abhängigkeit würde zeitabhängige Tests unmöglich machen.
+|===
+
+==== Top-Level-Zerlegung
+
+Das System besteht aus drei Schichten, die strikt in eine Richtung voneinander abhängen.
+
+----
+┌──────────────────────────────────────────────────────┐
+│  API-Schicht                                         │
+│  REST-Controller  │  CLI-Commands                    │
+│  Eingabevalidierung, Rollenmapping, Fehlerformat      │
+└──────────────────────────┬───────────────────────────┘
+                           │ (nur DTOs, keine Entitäten)
+┌──────────────────────────▼───────────────────────────┐
+│  Domänenschicht                                      │
+│  Use-Case-Handler, Domänenobjekte, Geschäftsregeln   │
+│  Kautionsberechnung, Sperrenprüfung, Einweisungsprüf.│
+│  Reservierungsverfall, Wartungsfälligkeit            │
+└──────────────────────────┬───────────────────────────┘
+                           │ (Repository-Interfaces)
+┌──────────────────────────▼───────────────────────────┐
+│  Persistenzschicht                                   │
+│  Repository-Implementierungen, lokale DB             │
+└──────────────────────────────────────────────────────┘
+----
+
+Die Domänenschicht kennt weder REST noch CLI.
+Sie spricht ausschließlich über Repository-Interfaces mit der Datenhaltung.
+Die API-Schicht ist dünn: Sie mappt HTTP-Request oder CLI-Argumente auf Use-Case-Eingaben und Use-Case-Ergebnisse auf HTTP-Antworten oder stdout/stderr.
+Domänenobjekte werden an Schichtgrenzen in DTOs übersetzt; sie verlassen die Domänenschicht nicht.
+
+==== Qualitätsziele und ihre Architekturmaßnahmen
+
+Jedes Qualitätsziel aus dem PRD erzwingt eine konkrete strukturelle Entscheidung.
+
+[cols="2,3"]
+|===
+|Qualitätsziel |Architekturmaßnahme
+
+|*Korrektheit der Kaution* +
+Kein Cent Abweichung über 50 Ausleihen
+|Kautionsberechnung als isolierte Domänenfunktion mit expliziter Formel (20 % des Wiederbeschaffungswerts, kaufmännisch gerundet, 5–100 EUR Korridor).
+Kein Inline-Code in Controllern oder Repositories. +
+→ ADR-002
+
+|*Sicherheit (Einweisungspflicht)* +
+Kein einweisungspflichtiger Gegenstand ohne dokumentierte Einweisung
+|Einweisungsprüfung liegt in der Domänenschicht und wird vor jedem Ausleihvorgang aufgerufen.
+Controller können diese Prüfung nicht umgehen.
+Jede Schnittstelle (REST und CLI) läuft durch denselben Use-Case-Handler.
+Nachweis: je ein automatisierter Test pro Schnittstelle.
+
+|*Nachvollziehbarkeit* +
+Jeder Zustandswechsel und jede Kautionsbewegung mit Zeitstempel und Auslöser
+|Audit-Log ist kein opt-in-Feature, sondern ein Seiteneffekt jedes Use-Case-Handlers.
+Kein Zustandswechsel ohne Audit-Eintrag. +
+Felder: Zeitstempel, Betrag (bei Kautionsbewegungen), Auslöser, Verweis auf Prüfprotokoll.
+
+|*Antwortzeit < 300 ms* +
+95. Perzentil über 100 Aufrufe bei 400 Gegenständen / 800 Mitgliedern
+|Kein Remote-Call.
+Alle Daten liegen lokal.
+Die Ausgabefähigkeitsprüfung kombiniert mehrere Bedingungen (Verfügbarkeit, Sperre, Einweisung, Wartungsfälligkeit, offene Ausleihenanzahl), die durch gezielte Index-Abfragen auf der lokalen DB abgedeckt werden.
+
+|*Testbarkeit* +
+Fristen kontrollierbar; Repositories austauschbar
+|Clock-Interface mit austauschbarer Implementierung (Produktion: Systemdatum; Tests: festes Datum).
+Repositories als Interfaces mit einer In-Memory-Implementierung für Unit-Tests und einer DB-Implementierung für Integrationstests.
+|===
+
+==== Architekturentscheidungen (Übersicht)
+
+Die folgenden ADRs dokumentieren die Entscheidungen mit Kontext, Alternativen und Pugh-Matrix.
+Sie sind in Kapitel 9 vollständig ausgeführt.
+
+[cols="1,3"]
+|===
+|ADR |Entscheidung
+
+|ADR-001
+|Persistenzstrategie: lokale Datenbank, ein Prozess, keine externe Abhängigkeit
+
+|ADR-002
+|Kautionsberechnung als explizite Domänenfunktion, nicht als Inline-Code
+
+|ADR-003
+|On-Demand-Auswertung von Reservierungsverfall: kein Hintergrundprozess, Prüfung beim Zugriff
+
+|ADR-004
+|Sperre als abgeleiteter Zustand: nicht persistiert, sondern bei jedem Zugriff aus den offenen Ausleihen berechnet
+
+|ADR-005
+|Laufzeitumgebung und Framework-Stack: TypeScript + NestJS + Drizzle ORM + Jest/Cucumber
+|===
+
+ADR-003 und ADR-004 zusammen vermeiden einen Hintergrundprozess (Cron, Scheduler, Timer-Thread).
+Da der Verein nur zweimal wöchentlich öffnet, ist ein Prozess, der zwischen den Öffnungszeiten läuft, unnötig komplex und fehleranfällig.
+Beide Zustände werden on-demand beim nächsten Aufruf korrekt berechnet.

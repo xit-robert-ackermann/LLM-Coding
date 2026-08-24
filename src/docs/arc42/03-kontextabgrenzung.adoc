@@ -1,0 +1,78 @@
+=== Kontextabgrenzung
+
+==== Fachlicher Kontext
+
+Das System _Leihgut_ hat drei menschliche Akteure und keine externen Fremdsysteme.
+Kein Mailversand, keine Zahlungsanbindung, keine Cloud — alle Daten bleiben lokal.
+
+[plantuml]
+----
+!include <C4/C4_Context>
+
+LAYOUT_WITH_LEGEND()
+
+Person(karim, "Karim", "Thekendienst\nGibt Gegenstände aus und nimmt sie zurück.\nNutzt REST-API über HTTP-Client oder Postman.")
+Person(sabine, "Sabine", "Mitglied\nPrüft Verfügbarkeit und legt Vormerkungen an.\nNutzt REST-API direkt (Rolle: mitglied).")
+Person(rolf, "Rolf", "Werkstattwart\nPrüft zurückgegebene Gegenstände,\nführt Wartungen durch, legt Einweisungen an.\nNutzt CLI (Rolle: wart) und REST-API (lesend).")
+
+System(leihgut, "Leihgut", "Verwaltet Ausleihen, Kaution, Wartung\nund Vormerkungen für die Bibliothek der Dinge.")
+
+Rel(karim, leihgut, "Ausleihe, Verlängerung, Rückgabe,\nKatalog- und Mitgliederpflege", "REST/JSON\nX-Rolle: thekendienst")
+Rel(sabine, leihgut, "Verfügbarkeit abfragen,\nVormerkung anlegen/stornieren", "REST/JSON\nX-Rolle: mitglied")
+Rel(rolf, leihgut, "Prüfung, Wartung,\nEinweisung dokumentieren", "CLI\n--rolle wart")
+Rel(rolf, leihgut, "Prüfliste, Ausleihen,\nAudit-Log einsehen", "REST/JSON\nX-Rolle: wart")
+----
+
+Externe Systeme existieren absichtlich nicht.
+Der Verein verwaltet Beiträge, Bargeldbestand und Mitgliedschaft außerhalb dieses Systems.
+Benachrichtigungen, Kassenführung und Forderungen über die Kaution hinaus sind explizit ausgeschlossen (PRD §Nicht-Ziele).
+
+Die folgende Tabelle beschreibt, welche Aufgaben jeder Akteur über welche Schnittstelle wahrnimmt:
+
+[cols="1,2,3"]
+|===
+|Akteur |Schnittstelle |Fachliche Aufgaben
+
+|Thekendienst (Karim)
+|REST-API, Rolle `thekendienst`
+|Mitglied anlegen; Gegenstand ausgeben (UC-01); Ausleihe verlängern (UC-02); Rückgabe entgegennehmen (UC-03); Katalog pflegen (UC-08); Ausleihen und Vormerkungen einsehen (UC-10)
+
+|Mitglied (Sabine)
+|REST-API, Rolle `mitglied`
+|Verfügbarkeit und Kategorien abfragen (UC-07); Vormerkung anlegen und stornieren (UC-07); Reservierung stornieren (UC-07)
+
+|Werkstattwart (Rolf)
+|CLI (Rolle `wart`) + REST-API (Rolle `wart`, lesend)
+|Prüfprotokoll erstellen (UC-04); Wartung abschließen (UC-05); Einweisung dokumentieren (UC-06); Prüfliste einsehen (GET /pruefungen); Ausleihen und Audit-Log abfragen (UC-10)
+|===
+
+==== Technischer Kontext
+
+Alle Kanäle sind lokal.
+Es gibt keinen Netzwerkaufruf zu einem Fremdsystem; die Persistenz liegt auf demselben Rechner wie der Prozess.
+
+[cols="2,1,1,2"]
+|===
+|Schnittstelle |Protokoll |Format |Rollenmechanismus
+
+|REST-API
+|HTTP/1.1
+|JSON (Fehlerschema: `fehlercode` / `nachricht` / `details`)
+|Header `X-Rolle: mitglied \| thekendienst \| wart`
+
+|CLI
+|stdin / stdout / stderr
+|Text (Fehler auf stderr, Exit-Code 1; Erfolg auf stdout, Exit-Code 0)
+|Flag `--rolle wart`
+
+|Persistenz
+|lokal (Datei oder In-Process-DB)
+|Datenbankdatei
+|— (kein Netzwerkzugang)
+|===
+
+Die REST-API verwendet den Pfad-Präfix `/` ohne versionierten Pfad.
+Ressourcennamen folgen dem Glossar im PRD (deutsch, kleingeschrieben): `/ausleihen`, `/gegenstaende`, `/vormerkungen` usw.
+
+Die Authentifizierung ist bewusst trivial gehalten: Rollen werden übergeben und nicht kryptografisch geprüft.
+Ein echtes Login ist ausdrücklich kein Bestandteil von Release 1 (PRD §Authentifizierung).

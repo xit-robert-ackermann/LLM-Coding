@@ -1,0 +1,76 @@
+=== Kapitel 7: Verteilungssicht
+
+==== 7.1 Infrastruktur
+
+Das System läuft als einzelner Prozess auf einem vereinseigenen Rechner.
+Alle Schnittstellen — REST-API und CLI — sind in diesen einen Prozess integriert.
+Eine externe Datenbank, ein Netzwerkdienst oder eine Cloud-Komponente existieren nicht.
+
+[plantuml]
+----
+@startuml
+!include <C4/C4_Deployment>
+
+title Verteilungssicht — Leihgut
+
+Deployment_Node(vereinsrechner, "Vereins-Rechner", "Lokaler PC oder Server im Vereinsraum") {
+  Container(leihgut_prozess, "Leihgut-Prozess", "REST API + Domäne + CLI", "Ein einziger Prozess; startet mit ./leihgut start")
+  ContainerDb(sqlite_datei, "SQLite-Datei", "leihgut.db", "Lokale Datenbankdatei im Dateisystem des Vereins-Rechners")
+}
+
+Deployment_Node(thekengeraet, "Thekendienst-Gerät", "Tablet oder Laptop an der Theke") {
+  Container(http_client, "HTTP-Client", "Browser, Postman o. Ä.", "Sendet REST-Anfragen; kein installierter Client nötig")
+}
+
+Deployment_Node(wartgeraet, "Wart-Gerät", "Rolf's Laptop") {
+  Container(terminal, "Terminal", "CLI-Zugang", "Führt leihgut-Kommandos aus (pruefe, warte, einweise)")
+}
+
+Rel(http_client, leihgut_prozess, "REST-Anfragen", "HTTP, lokales Netz")
+Rel(terminal, leihgut_prozess, "CLI-Kommandos", "SSH oder direkter Zugriff")
+Rel(leihgut_prozess, sqlite_datei, "liest / schreibt", "SQLite-Treiber")
+
+@enduml
+----
+
+==== 7.2 Betriebsanforderungen
+
+[cols="2,5"]
+|===
+|Anforderung |Erläuterung
+
+|Ein Prozess
+|REST-API, Domänenschicht und CLI sind Teil desselben Prozesses.
+Es gibt keinen separaten API-Server, keine Microservices und keine Hintergrund-Daemons außer dem einen Leihgut-Prozess.
+
+|Lokaler Start
+|Das System startet mit einem einzigen Kommando (z. B. `./leihgut start`) ohne weitere Konfigurationsschritte.
+Keine Containerorchestrierung, kein Deployment-Skript.
+
+|Keine externen Dienste
+|Kein Mailversand, keine Zahlungsanbindung, keine Cloud-API, kein externer Identity-Provider.
+Das System ist voll funktionsfähig ohne Internetzugang.
+
+|Persistenz durch SQLite
+|Die Datenbank ist eine einzelne Datei (`leihgut.db`) im lokalen Dateisystem.
+Kein laufender Datenbankserver, keine Netzwerkverbindung zur Datenbank.
+
+|Backup
+|Manuelles Kopieren der Datei `leihgut.db` auf ein externes Medium.
+Kein automatisiertes Backup-System ist Teil dieses Releases.
+
+|Authentifizierung
+|Rollen werden über den HTTP-Header `X-Rolle` bzw. das CLI-Flag `--rolle` übergeben und nicht kryptographisch geprüft (BR-039).
+Das System läuft im Vereinsinternen Netz; ein echtes Login ist ausdrücklich nicht Teil dieses Systems.
+|===
+
+==== 7.3 Verfügbarkeit
+
+Verfügbarkeit ist kein Qualitätsziel dieses Systems (PRD, Abschnitt „Qualitätsziele").
+
+Der Verein öffnet dienstags und samstags.
+Ein Ausfall des Systems zwischen den Öffnungstagen ist folgenlos.
+Ein Ausfall während des Betriebs ist unangenehm, aber durch Rückkehr zum Ringbuch überbrückbar.
+
+Es gibt weder eine Hochverfügbarkeitsinfrastruktur noch ein Monitoring-System, das einen Neustart auslöst.
+Fällt der Prozess aus, startet ihn ein Vereinsmitglied manuell neu.

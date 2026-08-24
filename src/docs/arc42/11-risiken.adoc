@@ -1,0 +1,86 @@
+=== Risiken und technische Schulden
+
+Dieses Kapitel trennt bewusst zwischen Risiken — unerwünschten Ereignissen, die eintreten können — und technischen Schulden — bekannten Mängeln, die mit ihrer Behebung warten.
+
+==== 11.1 Risiken
+
+[cols="1,4,1,1,4,2", options="header"]
+|===
+|ID |Risiko |W |A |Maßnahme |Ref
+
+|R-001
+|Rolle im HTTP-Header oder CLI-Flag kann gefälscht werden, da keine kryptographische Prüfung stattfindet (BR-039). Ein Angreifer mit Netzwerkzugang könnte sich als `wart` oder `thekendienst` ausgeben.
+|H
+|M
+|Akzeptiertes Risiko — Vereinssystem, ausschließlich interne Nutzung. Scope-Abgrenzung im PRD explizit festgehalten. Kein externer Zugang vorgesehen.
+|T-001, T-006
+
+|R-002
+|SQLite-Datei kann direkt manipuliert werden, ohne die Anwendungsschicht zu durchlaufen. Kautionsbewegungen oder Prüfprotokolle könnten unbemerkt verändert werden.
+|M
+|H
+|Backup-Empfehlung im Betriebshandbuch. Audit-Log als Kontrollinstanz: jede Kautionsbewegung trägt Zeitstempel und Auslöser (BR-022). Abweichungen zwischen Saldo und Log-Summe sind nachweisbar.
+|T-002
+
+|R-003
+|On-Demand-Verfallsprüfung für Reservierungen erzeugt kurze Inkonsistenzfenster: Reservierungen bleiben intern abgelaufen, solange kein Request sie auflöst. Ein zweiter Request in diesem Fenster könnte veraltete Daten sehen.
+|M
+|M
+|Strategiemuster dokumentiert in ADR-003. Fenster ist auf die Zeit zwischen letztem und nächstem relevantem Request begrenzt — bei zweimal wöchentlichem Betrieb akzeptabel.
+|ADR-003
+
+|R-004
+|`LocalDate.now()` direkt im Domänencode aufgerufen — Fristen sind dann in Tests nicht kontrollierbar. Tests, die Überfälligkeit, Reservierungsverfall oder Sperren prüfen, liefern datumsabhängige Ergebnisse.
+|M
+|H
+|`IClock`-Interface erzwingen (PRD: „austauschbare Datumsquelle"). Direktes `LocalDate.now()` im Domänen- und Anwendungscode per Linter oder Code-Review verbieten. Tests verwenden `FixedClock`.
+|—
+
+|R-005
+|Wart prüft Gegenstand Tage nach der Rückgabe, ohne das Gerät gesehen zu haben, weil eine andere Person zwischenzeitlich Schäden verursacht haben könnte — oder der Schaden schon vorher bestand.
+|M
+|M
+|Frühere Prüfprotokolle sind über `GET /pruefungen` einsehbar und liefern Vorschadensstatus (BR-017). Thekendienst erfasst Auffälligkeiten bereits bei der Rückgabe (BR-015).
+|UC-04
+
+|R-006
+|SQLite-Datei nicht gesichert. Hardwareausfall oder versehentliches Löschen führt zu vollständigem Datenverlust — alle Kautionsstände, Ausleihdaten und Prüfprotokolle wären verloren.
+|M
+|H
+|Betriebshandbuch schreibt tägliches Backup der `.db`-Datei vor. Empfohlen: kopieren auf separates Medium oder versioniertes Verzeichnis.
+|—
+|===
+
+W = Eintrittswahrscheinlichkeit (H = Hoch, M = Mittel, N = Niedrig) +
+A = Auswirkung (H = Hoch, M = Mittel, N = Niedrig)
+
+==== 11.2 Technische Schulden
+
+[cols="1,3,3,3,2", options="header"]
+|===
+|ID |Schuld |Ursache |Kosten bei Nicht-Behebung |Prio
+
+|TD-001
+|Keine echte Authentifizierung. Rollen werden nicht verifiziert; jede aufrufende Seite kann sich als beliebige Rolle ausgeben.
+|Bewusste Scope-Entscheidung im PRD. Ein echtes Login ist explizit ausgeschlossen. System ist für internen, beaufsichtigten Betrieb konzipiert.
+|Missbrauch sobald das System außerhalb des Vereinsnetzes erreichbar ist. Ohne Auth ist jede Rollentrennung wirkungslos.
+|Niedrig — solange Zugang nur intern
+
+|TD-002
+|Keine Paginierung in List-Endpunkten (außer `/audit`). Alle Gegenstände, Mitglieder oder Ausleihen werden in einer Antwort zurückgegeben.
+|Vereinsgröße (≈ 400 Gegenstände, ≈ 800 Mitglieder) macht Paginierung derzeit wirkungslos. Aufwand wäre nicht gerechtfertigt.
+|Performance- und Speicherprobleme ab ≈ 1 000 Einträgen pro Collection. Clients müssen dann angepasst werden.
+|Niedrig — erst bei deutlichem Wachstum relevant
+
+|TD-003
+|Kein Migrations-Framework für das Datenbankschema. Schema-Änderungen erfordern manuelle SQL-Skripte oder Neuerstellung der Datenbank.
+|Erst bei der ersten Schema-Änderung nach dem Go-live ein Problem. Release 1 hat kein Vorgängerschema.
+|Jedes Schema-Update trägt Migrationsrisiko. Produktionsdaten können bei Fehler verloren gehen. Rollback ist ohne Framework manuell aufwendig.
+|Mittel — spätestens beim ersten Schema-Update adressieren
+
+|TD-004
+|Keine Benachrichtigung bei Reservierungsentstehung oder -verfall. Mitglieder erfahren nicht aktiv, wenn ein Gegenstand für sie reserviert wurde oder die Reservierung abläuft.
+|Explizit Out of Scope im PRD (Release 1). Kein Mailversand, keine externe Anbindung.
+|Mitglieder verpassen Reservierungen. Vergebliche Wege steigen — Erfolgskriterium „unter 2 Prozent vergebliche Wege bei Vormerkung" wird schwieriger einzuhalten.
+|Mittel — für Release 2 vorgesehen
+|===

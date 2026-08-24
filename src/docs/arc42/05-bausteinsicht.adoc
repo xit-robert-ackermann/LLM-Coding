@@ -1,0 +1,149 @@
+=== Bausteinsicht
+
+Die Bausteinsicht zeigt, wie das System _Leihgut_ in Bausteine zerlegt ist, welche Verantwortlichkeiten diese tragen und wie sie zusammenhängen.
+
+==== Ebene 1: Gesamtsystem
+
+Das System besteht aus vier Laufzeit-Containern und wird von drei Akteuren genutzt.
+
+[plantuml]
+----
+@startuml
+!include <C4/C4_Container>
+
+LAYOUT_WITH_LEGEND()
+
+title Leihgut — Container-Diagramm (C4 Ebene 2)
+
+Person(theke, "Thekendienst", "Gibt Gegenstände aus und nimmt sie zurück (Karim).")
+Person(mitglied, "Mitglied", "Fragt Verfügbarkeit ab, merkt vor (Sabine).")
+Person(wart, "Wart", "Prüft, wartet, mustert aus (Rolf).")
+
+System_Boundary(leihgut, "Leihgut") {
+    Container(api, "REST API", "HTTP-API, JSON", "Endpunkte für Thekendienst und Mitglied.\nRolle wird per X-Rolle-Header übergeben.")
+    Container(cli, "CLI", "CLI-Anwendung", "Kommandos für den Wart:\nleihgut pruefe / warte / einweise.")
+    Container(domain, "Domäne", "Library / Modul", "Fachlogik und Use-Case-Handler.\nKein Framework-Code.")
+    ContainerDb(db, "Persistenz", "SQLite (lokal)", "Gegenstände, Ausleihen, Mitglieder,\nVormerkungen, Kautionsbewegungen,\nAudit-Log.")
+}
+
+Rel(theke, api, "Benutzt", "HTTPS / JSON")
+Rel(mitglied, api, "Benutzt", "HTTPS / JSON")
+Rel(wart, cli, "Benutzt", "stdin / stdout")
+
+Rel(api, domain, "Delegiert an", "in-process")
+Rel(cli, domain, "Delegiert an", "in-process")
+Rel(domain, db, "Liest / schreibt", "Repository-Interfaces")
+
+@enduml
+----
+
+==== Ebene 2: Domänenmodul
+
+Das Domänenmodul enthält die gesamte Fachlogik.
+API und CLI sind dünne Adapter: Sie übersetzen HTTP-Anfragen bzw. CLI-Argumente in Use-Case-Aufrufe und reichen die Antwort zurück.
+
+[plantuml]
+----
+@startuml
+!include <C4/C4_Component>
+
+LAYOUT_WITH_LEGEND()
+
+title Leihgut — Domänenmodul (C4 Ebene 3)
+
+Container_Boundary(domain, "Domäne") {
+
+    Component(ausleihe, "AusleiheService", "Use-Case-Handler",
+        "UC-01 Ausgabe, UC-02 Verlängerung,\nUC-03 Rückgabe.")
+
+    Component(pruefung, "PruefungService", "Use-Case-Handler",
+        "UC-04 Prüfprotokoll, Kautionsabschluss,\nNutzungszähler, Folgestatus.")
+
+    Component(wartung, "WartungService", "Use-Case-Handler",
+        "UC-05 Wartungsabschluss,\nNutzungszähler zurücksetzen.")
+
+    Component(einweisung, "EinweisungService", "Use-Case-Handler",
+        "UC-06 Einweisung anlegen.")
+
+    Component(vormerkung, "VormerkungService", "Use-Case-Handler",
+        "UC-07 Vormerken, UC-09 Reservierung anlegen\nund verfallen lassen.")
+
+    Component(katalog, "KatalogService", "Use-Case-Handler",
+        "UC-08 Kategorien und Gegenstände\nanlegen und abfragen.")
+
+    Component(audit, "AuditService", "Querschnittskomponente",
+        "Kautionsbewegungen und Zustandswechsel\naufzeichnen (BR-022).")
+
+    Component(uhr, "DateSource", "Clock-Interface",
+        "Austauschbare Datumsquelle (BR-039, UC-09).\nProduktiv: SystemDateSource. Tests: FixedDateSource.")
+
+    Component(repoGegenstand, "IGegenstandRepository", "Interface",
+        "CRUD für Gegenstand-Aggregate.")
+
+    Component(repoAusleihe, "IAusleiheRepository", "Interface",
+        "CRUD für Ausleihe-Aggregate.")
+
+    Component(repoMitglied, "IMitgliedRepository", "Interface",
+        "CRUD für Mitglied-Aggregate.")
+
+    Component(repoVormerkung, "IVormerkungRepository", "Interface",
+        "CRUD für Vormerkung- und Reservierungs-Aggregate.")
+
+    Component(repoAudit, "IAuditRepository", "Interface",
+        "Schreibt Audit-Einträge und Kautionsbewegungen.")
+}
+
+Rel(ausleihe, repoGegenstand, "liest / schreibt")
+Rel(ausleihe, repoMitglied, "liest")
+Rel(ausleihe, repoAusleihe, "schreibt")
+Rel(ausleihe, repoVormerkung, "liest (Reservierungscheck)")
+Rel(ausleihe, audit, "erzeugt HINTERLEGUNG")
+Rel(ausleihe, uhr, "liest Datum")
+
+Rel(pruefung, repoAusleihe, "liest / schreibt")
+Rel(pruefung, repoGegenstand, "schreibt")
+Rel(pruefung, vormerkung, "löst Reservierung aus")
+Rel(pruefung, audit, "erzeugt ABZUG / FREIGABE,\nZustandswechsel")
+Rel(pruefung, uhr, "liest Datum")
+
+Rel(wartung, repoGegenstand, "schreibt")
+Rel(wartung, audit, "erzeugt Zustandswechsel")
+
+Rel(einweisung, repoMitglied, "schreibt")
+
+Rel(vormerkung, repoVormerkung, "liest / schreibt")
+Rel(vormerkung, repoGegenstand, "liest (Folgestatus)")
+Rel(vormerkung, uhr, "liest Datum (Verfall)")
+
+Rel(katalog, repoGegenstand, "liest / schreibt")
+
+@enduml
+----
+
+==== Wichtige Schnittstellen
+
+Die folgenden Interfaces bilden die Grenze zwischen Domäne und Infrastruktur.
+Alle Repository-Implementierungen liegen außerhalb der Domäne; die Domäne kennt nur die Interfaces.
+
+[cols="2,4"]
+|===
+|Interface |Verantwortung
+
+|`IGegenstandRepository`
+|Gegenstand nach Inventarnummer laden; Status setzen; Nutzungszähler schreiben; nach Kategorie und Status filtern.
+
+|`IAusleiheRepository`
+|Ausleihe anlegen; nach ID laden; Status auf AUSGELIEHEN, IN_PRUEFUNG, ABGESCHLOSSEN setzen; offene Ausleihen eines Mitglieds zählen.
+
+|`IMitgliedRepository`
+|Mitglied anlegen und nach ID laden; Einweisungen lesen und schreiben; Sperrstatus aus offenen überfälligen Ausleihen ableiten.
+
+|`IVormerkungRepository`
+|Vormerkungen je Kategorie als Warteschlange (FIFO nach Eingangszeit) lesen und schreiben; Reservierungen anlegen und auf RESERVIERT / ABGEHOLT / VERFALLEN setzen.
+
+|`IAuditRepository`
+|Kautionsbewegung (Typ, Betrag, Zeitstempel, Auslöser-ID) einfügen; Zustandswechsel eines Gegenstands protokollieren; beides append-only.
+
+|`DateSource` (Interface), `SystemDateSource` (prod), `FixedDateSource` (test)
+|Heutiges Datum liefern. Erlaubt deterministischen Fristtest ohne Systemuhr.
+|===

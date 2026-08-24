@@ -1,0 +1,79 @@
+=== Randbedingungen
+
+==== Technische Randbedingungen
+
+[cols="2,4", options="header"]
+|===
+|Randbedingung |Begründung / Herkunft
+
+|REST-API als primäre Schnittstelle für alle Anwendungsfälle
+|Alle Use Cases (UC-01 bis UC-10) sind über HTTP erreichbar. Kein direkter Datenbankzugriff durch Clients.
+
+|CLI für Wart-Aufgaben (`leihgut pruefe`, `leihgut warte`, `leihgut einweise`)
+|Prüfung, Wartungsabschluss und Einweisungen sind CLI-only. Die REST-API bietet dafür keinen Endpunkt.
+
+|Keine Web-Oberfläche
+|Visuelle Konsistenz ließe sich nicht automatisch prüfen. Compiler und Testsuite greifen als Fehlerkorrektur nur ohne UI voll.
+
+|Sprache: TypeScript (strict), Runtime: Node.js, Framework: NestJS
+|Entschieden per ADR-005. NestJS liefert DI-Container, Express-HTTP-Adapter und nestjs-commander für CLI in einem Prozess.
+
+|Persistenz: SQLite + Drizzle ORM
+|Entschieden per ADR-001 und ADR-005. `better-sqlite3` als Treiber, Drizzle als typsicheres Query-Building ohne Runtime-Overhead.
+
+|Ein Prozess, lokal startbar, ohne externe Dienste
+|Kein Message Broker, keine externe Datenbank, kein Cloud-Dienst. Vereinsbetrieb ohne IT-Infrastruktur.
+
+|Kein Mailversand, keine Zahlungsanbindung, keine Cloud
+|Kassenführung und Benachrichtigungen liegen außerhalb des Systems (PRD §Nicht-Ziele).
+
+|Node.js LTS als Laufzeitumgebung
+|Impliziert durch ADR-005 (NestJS + TypeScript). Java 17 nur für DocToolchain (Dokumentationsbuild).
+
+|Authentifizierung über HTTP-Header `X-Rolle` bzw. CLI-Flag `--rolle`
+|Kein echtes Login. Rollen werden mitgegeben, nicht kryptographisch geprüft (BR-039). Drei Rollen: `mitglied`, `thekendienst`, `wart`.
+
+|Datumsquelle muss austauschbar sein
+|Fristen (Rückgabefrist, Reservierungsverfall) müssen in Tests kontrollierbar gesetzt werden können. Kein direkter Aufruf von `LocalDate.now()` im Domänencode.
+|===
+
+==== Organisatorische Randbedingungen
+
+[cols="2,4", options="header"]
+|===
+|Randbedingung |Details
+
+|Ehrenamtlicher Betrieb, kein SLA
+|Der Verein hat keine IT-Abteilung. Betrieb und Pflege liegen bei Vereinsmitgliedern auf Freiwilligenbasis.
+
+|Öffnungszeiten: dienstags und samstags
+|Das System wird in der Praxis nur an zwei Tagen pro Woche aktiv genutzt. Geplante Ausfälle zwischen Öffnungstagen sind akzeptabel.
+
+|Verfügbarkeit ist kein Qualitätsziel
+|Explizit aus dem PRD. Downtime außerhalb der Öffnungszeiten ist betrieblich folgenlos.
+
+|Lokaler Betrieb durch ein Vereinsmitglied
+|Kein Hosting, kein Deployment-Prozess. Start per Kommandozeile auf einem vorhandenen Rechner.
+|===
+
+==== Konventionen
+
+[cols="2,4", options="header"]
+|===
+|Konvention |Verbindlichkeit
+
+|Ubiquitous Language
+|Alle Fachbegriffe aus dem Glossar des PRD gelten unverändert im Code: Klassen-, Methoden- und Variablennamen verwenden `Gegenstand`, `Ausleihe`, `Prüfprotokoll`, `Nutzungszähler` usw. Abweichungen sind Architekturverletzungen.
+
+|Docs-as-Code
+|Dokumentation in AsciiDoc, Diagramme in PlantUML (C4 via C4-PlantUML-Stdlib), gebaut mit docToolchain. Dokumentation liegt im selben Repository wie der Code.
+
+|Testreferenzierung
+|Jeder Test nennt die Use-Case-ID, gegen die er schreibt (z. B. `// UC-01`). Jede Geschäftsregel (BR-001 … BR-042) ist durch mindestens ein Gherkin-Szenario abgedeckt.
+
+|Commit-Format
+|Conventional Commits. Referenz auf Issue- oder Use-Case-ID im Commit-Body.
+
+|Fehlermeldungen
+|REST-Fehlerantworten folgen dem einheitlichen JSON-Fehlerformat (`fehlercode`, `nachricht`, `details`). CLI-Fehler gehen auf `stderr` mit Präfix `FEHLER [CODE]:`, Exit-Code 1. Alle Nachrichten sind deutschsprachig.
+|===

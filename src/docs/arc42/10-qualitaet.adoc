@@ -1,0 +1,406 @@
+=== Qualitätsanforderungen
+
+Dieses Kapitel konkretisiert die Qualitätsziele aus Kapitel 1.2 als messbare Szenarien.
+Jedes Szenario folgt dem sechsteiligen QAS-Format (Quality Attribute Scenario).
+Die Abschnitte 10.1 bis 10.8 decken alle acht ISO/IEC-25010-Charakteristika ab.
+Abschnitt 10.9 dokumentiert deren Priorität.
+
+---
+
+==== 10.1 Functional Suitability — Korrektheit
+
+*QAS-01* _(konkretisiert Kapitel-1.2-Top-Ziel: Korrektheit der Kaution)_
+
+[cols="1,3"]
+|===
+|Source
+|Rechnungsprüfer
+
+|Stimulus
+|Für ein Mitglied mit 50 abgeschlossenen Ausleihen wird der Kautionssaldo
+ aus den gespeicherten Kautionsbewegungen manuell nachgerechnet.
+
+|Artifact
+|`AuditService`, Kautionsbewegungstabelle (Einträge vom Typ
+ `HINTERLEGUNG`, `ABZUG`, `FREIGABE`)
+
+|Environment
+|Produktionsbetrieb, SQLite-Datenbank mit realem Datenbestand
+
+|Response
+|Das System summiert alle Bewegungsbeträge je Typ korrekt auf;
+ der errechnete Saldo stimmt mit der Datenbankhistorie überein.
+
+|Response Measure
+|Abweichung: 0 Cent. Nachgewiesen durch einen Integrationstest,
+ der 50 synthetische Ausleihen mit variierenden Kautionsbeträgen
+ erzeugt und den Saldo maschinell vergleicht. (BR-004, BR-020–022)
+|===
+
+---
+
+*QAS-02* _(konkretisiert Kapitel-1.2-Top-Ziel: Sicherheit / Einweisungspflicht)_
+
+[cols="1,3"]
+|===
+|Source
+|Mitglied (ohne dokumentierte Einweisung)
+
+|Stimulus
+|Ausleihe eines einweisungspflichtigen Gegenstands für ein Mitglied
+ ohne dokumentierte Einweisung für die betreffende Kategorie — Versuch
+ über alle verfügbaren Schnittstellen (REST `POST /ausleihen`, CLI).
+
+|Artifact
+|`AusleiheService`, Einweisungsprüfung (BR-010)
+
+|Environment
+|Normalbetrieb
+
+|Response
+|Kein Aufruf führt zur Ausgabe; das System antwortet mit einem
+ eindeutigen Ablehnungsgrund.
+
+|Response Measure
+|0 erfolgreiche Ausgaben; nachgewiesen durch je einen automatisierten
+ Test pro Schnittstelle (BR-010, PRD: Qualitätsziele).
+|===
+
+---
+
+==== 10.2 Performance Efficiency — Antwortzeit
+
+*QAS-03* _(konkretisiert Kapitel-1.2-Top-Ziel: Antwortzeit)_
+
+[cols="1,3"]
+|===
+|Source
+|Thekendienst
+
+|Stimulus
+|Prüfung der Ausgabefähigkeit eines Gegenstands — `POST /ausleihen`
+ inklusive aller Validierungen (Sperrstatus, Einweisung, Ausleihlimit,
+ On-Demand-Verfallsprüfung) — bei einem Datenbestand von 400
+ Gegenständen und 800 Mitgliedern.
+
+|Artifact
+|REST API, `AusleiheService`, SQLite-Persistenz
+
+|Environment
+|Normalbetrieb, lokale SQLite-Datenbankdatei auf dem Vereinsrechner
+
+|Response
+|Validierung und Antwort vollständig ausgeliefert.
+
+|Response Measure
+|< 300 ms, gemessen am 95. Perzentil über 100 aufeinanderfolgende
+ Aufrufe gegen eine vorpopulierte Datenbank.
+ (PRD: Qualitätsziele; Erfolgskriterium: Ausleihvorgang < 30 s)
+|===
+
+---
+
+==== 10.2b Maintainability — Nachvollziehbarkeit (Auditability)
+
+*QAS-03b* _(konkretisiert Kapitel-1.2-Top-Ziel: Nachvollziehbarkeit)_
+
+[cols="1,3"]
+|===
+|Source
+|Werkstattwart (Rolf)
+
+|Stimulus
+|Rolf schließt eine Prüfung mit Kautionsabzug ab (`leihgut pruefe <id> --ergebnis SCHADEN --abzug 2000`).
+
+|Artifact
+|`AuditService`, `IAuditRepository`, `KautionsbewegungEintrag`, `ZustandswechselEintrag`
+
+|Environment
+|Normalbetrieb, Prüfung Tage nach der Rückgabe
+
+|Response
+|Das System erzeugt einen `KautionsbewegungEintrag` (Typ ABZUG) mit Zeitstempel, Betrag und Verweis auf das Prüfprotokoll sowie einen `ZustandswechselEintrag` für den Gegenstand-Statuswechsel.
+Beide Einträge sind über `GET /ausleihen/{id}/kautionsbewegungen` abrufbar.
+
+|Response Measure
+|Der Audit-Eintrag enthält: Zeitstempel (ISO-8601), Betrag (20 EUR), pruefprotokollId (nicht null), vonStatus und nachStatus.
+Nachgewiesen durch automatisierten Test gegen UC-04 (BR-022, PRD: Qualitätsziel Nachvollziehbarkeit).
+|===
+
+---
+
+==== 10.3 Security — Rollen und Zugriffskontrolle
+
+*QAS-04* _(konkretisiert Kapitel-1.2-Top-Ziel: Sicherheit)_
+
+[cols="1,3"]
+|===
+|Source
+|Anfrage mit Rolle `mitglied` (HTTP-Header `X-Rolle: mitglied`)
+
+|Stimulus
+|`POST /ausleihen` — eine Ausleihe anlegen, obwohl diese Operation
+ der Rolle `thekendienst` vorbehalten ist.
+
+|Artifact
+|REST API, Rollenprüfung (BR-039–041)
+
+|Environment
+|Normalbetrieb
+
+|Response
+|HTTP 403, kein Seiteneffekt (keine Ausleihe in der Datenbank,
+ keine Kautionsbewegung).
+
+|Response Measure
+|100 % der Aufrufe mit unzulässiger Rolle werden mit HTTP 403
+ abgewiesen; nachgewiesen durch automatisierten Test für jede
+ rollenbeschränkte Operation. (T-006 im Bedrohungsmodell)
+|===
+
+---
+
+*QAS-05*
+
+[cols="1,3"]
+|===
+|Source
+|Angreifer mit physischem Zugang zum Vereinsrechner
+
+|Stimulus
+|Direktes Einfügen oder Verändern von Datensätzen in der SQLite-Datei
+ unter Umgehung der Applikationsschicht (z. B. über `sqlite3`-CLI).
+
+|Artifact
+|SQLite-Datenbankdatei
+
+|Environment
+|Physischer Zugang zum Vereinsrechner; Applikation gestoppt oder parallel laufend
+
+|Response
+|Das System kann diesen Zugriff nicht verhindern.
+
+|Response Measure
+|Akzeptiertes Restrisiko (T-002 im Bedrohungsmodell).
+ Begründung: Das System hat keinen Außenzugang; physischer Zugang
+ setzt Vereinsmitgliedschaft voraus.
+ Gegenmaßnahmen liegen in der Betriebsverantwortung des Vereins
+ (Zugangskontrolle, OS-Dateiberechtigungen, regelmäßige Backups).
+|===
+
+---
+
+==== 10.4 Maintainability — Wartbarkeit
+
+*QAS-06*
+
+[cols="1,3"]
+|===
+|Source
+|Entwickler
+
+|Stimulus
+|Eine neue Geschäftsregel ändert die Kautionsformel (z. B. anderer
+ Prozentsatz oder andere Grenzwerte als in BR-004).
+
+|Artifact
+|Domänenschicht, Funktion `berechneKaution` (ADR-002)
+
+|Environment
+|Entwicklungszeit
+
+|Response
+|Der Entwickler ändert ausschließlich die eine Funktion und ihre
+ direkten Tests; alle anderen Tests bleiben unberührt und grün.
+
+|Response Measure
+|Änderung betrifft ≤ 1 Klasse / Funktion;
+ alle automatisierten Tests grün nach der Änderung.
+ (ADR-002; PRD: Definition of Done)
+|===
+
+---
+
+==== 10.5 Reliability — Zuverlässigkeit
+
+*QAS-07*
+
+[cols="1,3"]
+|===
+|Source
+|Thekendienst
+
+|Stimulus
+|Systemabsturz (Prozessabbruch, Stromausfall) zwischen dem Anlegen der
+ Ausleihe und dem Erzeugen der Kautionsbewegung `HINTERLEGUNG`.
+
+|Artifact
+|Persistenzschicht, Transaktionskonzept (SQLite-ACID, ADR-001)
+
+|Environment
+|Normalbetrieb, beliebiger Zeitpunkt während einer Schreiboperation
+
+|Response
+|Beim nächsten Start sind entweder Ausleihe _und_ Kautionsbewegung
+ vorhanden oder keine der beiden (Atomarität).
+
+|Response Measure
+|Keine halbfertigen Ausleihen (Ausleihe ohne zugehörige
+ `HINTERLEGUNG`-Bewegung) in der Datenbank nach einem simulierten
+ Absturz; nachgewiesen durch einen Test, der eine Transaktion
+ forciert abbricht und den Datenbankzustand prüft. (BR-011, BR-022)
+|===
+
+---
+
+==== 10.6 Usability — Benutzbarkeit
+
+*QAS-08*
+
+[cols="1,3"]
+|===
+|Source
+|Karim (Thekendienst, ehrenamtlich, alle zwei Wochen)
+
+|Stimulus
+|Ausgabe eines Gegenstands an der Theke bei 20 wartenden Mitgliedern —
+ Karim führt den vollständigen Ausleihvorgang durch.
+
+|Artifact
+|REST API (Thekendienst-Workflow: Verfügbarkeit prüfen → ausleihen)
+
+|Environment
+|Öffnungszeiten, Warteschlange vor der Theke
+
+|Response
+|Alle Validierungen laufen durch; bei Ablehnung liefert das System
+ einen eindeutigen maschinenlesbaren Ablehnungsgrund,
+ den die Thekenoberfläche direkt anzeigen kann.
+
+|Response Measure
+|Gesamter Ausleihvorgang abgeschlossen in < 30 Sekunden
+ (Erfolgskriterium aus PRD).
+ Ablehnungsgrund in der API-Antwort: immer als strukturiertes Feld,
+ kein generischer Fehlertext.
+|===
+
+---
+
+==== 10.7 Portability — Übertragbarkeit
+
+*QAS-09*
+
+[cols="1,3"]
+|===
+|Source
+|Vereinsmitglied (Betrieb)
+
+|Stimulus
+|Wechsel auf einen anderen Vereinsrechner — Kopieren der
+ Applikationsdatei und der SQLite-Datenbankdatei.
+
+|Artifact
+|Gesamtsystem (Applikationsbinärformat + SQLite-Datei)
+
+|Environment
+|Vereinsrechner mit kompatiblem Betriebssystem (gleiche Plattform)
+
+|Response
+|Das System startet auf dem neuen Rechner und arbeitet mit dem
+ kopierten Datenbestand weiter.
+
+|Response Measure
+|System startet ohne Neuinstallation nach Datei-Kopie;
+ kein Migrations-Skript, kein Dienst-Setup.
+ Nachgewiesen durch den Deployment-Abschnitt der Dokumentation
+ und einen Smoke-Test nach Kopie.
+ (PRD: Rahmenbedingungen — Ein Prozess, lokal startbar)
+|===
+
+---
+
+==== 10.8 Compatibility — Kompatibilität
+
+*QAS-10*
+
+[cols="1,3"]
+|===
+|Source
+|HTTP-Client (curl, Postman, Tablet-Browser, beliebiges REST-fähiges Werkzeug)
+
+|Stimulus
+|REST-Aufruf an einen beliebigen API-Endpunkt mit Standard-HTTP/1.1
+ und JSON-Payload.
+
+|Artifact
+|REST API
+
+|Environment
+|Lokales Netz des Vereins
+
+|Response
+|Das System antwortet mit korrekt formatiertem JSON und Standard-HTTP-Statuscodes.
+
+|Response Measure
+|Kein proprietäres Protokoll, kein vendor-spezifischer Header
+ als Pflichtfeld; alle Endpunkte mit einem `curl`-Einzeiler aufrufbar.
+ Nachgewiesen durch eine curl-basierte Smoke-Test-Suite in der CI.
+ (PRD: Rahmenbedingungen — REST-API)
+|===
+
+---
+
+==== 10.9 Priorisierung der Qualitätsziele
+
+Die folgende Tabelle ordnet die acht ISO/IEC-25010-Charakteristika nach ihrer Bedeutung
+für das System _Leihgut_.
+Die drei wichtigsten sind in Kapitel 1.2 als Top-Ziele geführt.
+
+[cols="1,2,4"]
+|===
+|Priorität |Charakteristikum |Begründung
+
+|1
+|Functional Suitability
+|Kautionsfehler schädigen Mitglieder direkt und untergraben das Vertrauen in den Verein.
+ Ausgaben trotz fehlender Einweisung sind ein Haftungsrisiko.
+ Beide Szenarien haben Messgröße 0 — null Fehler erlaubt. _(Top-Ziel Kapitel 1.2)_
+
+|2
+|Security
+|Die Einweisungspflicht ist nicht nur eine Geschäftsregel, sondern ein Sicherheitsmerkmal.
+ Eine falsche Ausgabe kann Personenschäden verursachen.
+ Rollenverletzungen (QAS-04) müssen lückenlos erkannt werden. _(Top-Ziel Kapitel 1.2)_
+
+|3
+|Maintainability
+|Das System ist ehrenamtlich entwickelt und wird selten angefasst.
+ Hohe Wartbarkeit reduziert das Risiko, dass Korrekturen neue Fehler einführen.
+ ADR-002 und ADR-004 sind direkte Konsequenzen dieser Priorisierung.
+
+|4
+|Performance Efficiency
+|Das 30-Sekunden-Ziel (PRD: Erfolgskriterien) ist ein hartes Kriterium.
+ Ein langsames System macht ehrenamtliche Arbeit an der Theke unerträglich. _(Top-Ziel Kapitel 1.2)_
+
+|5
+|Reliability
+|Datenverlust oder inkonsistente Transaktionen würden die Kautionskorrektheit gefährden.
+ SQLite-ACID (ADR-001) adressiert dieses Risiko mit geringem Aufwand.
+
+|6
+|Portability
+|Vereinsrechner wechseln gelegentlich.
+ Ein komplexes Deployment würde die Betriebslast erhöhen.
+
+|7
+|Usability
+|Die API hat keine eigene UI; Usability wirkt über die Thekenoberfläche,
+ die außerhalb dieses Systems liegt.
+ Klare Fehlercodes sind das einzige direkte Mittel.
+
+|8
+|Compatibility
+|Standardprotokolle (HTTP/JSON) werden von Anfang an eingehalten.
+ Keine proprietären Erweiterungen — kein aktiver Aufwand nötig.
+|===
