@@ -1,0 +1,110 @@
+= leihgut-ADR-006: Clock Port and Audit Atomicity
+:status: Accepted
+:date: 2026-08-24
+:toc: left
+:icons: font
+
+== Status
+
+Accepted
+
+== Context
+
+Two independent concerns converge in this ADR:
+
+=== 1. Time Abstraction
+
+All use cases in this system depend on the current date or time:
+
+* UC-01 computes `rueckgabefrist = today + leihdauer_tage`.
+* UC-02 checks `rueckgabefrist < today` to detect overdue loans.
+* UC-03, UC-04, UC-06, UC-07, UC-08 record `erstellt_am`, `zeitstempel`, etc.
+* Member lock detection compares `Ausleihe.rueckgabefrist` against today.
+
+If services call `datetime.now()` directly, date-dependent tests become fragile
+(test output depends on the real calendar date), non-deterministic, and impossible
+to run for a specific historical scenario without mocking the global module.
+
+=== 2. Audit Atomicity
+
+Every state-changing use case must write an `AuditLogEintrag` alongside the business
+change. If the audit write and the business write are in separate transactions, a
+crash between the two leaves the system in a state where a business change occurred
+with no audit record — a compliance failure.
+
+== Decision
+
+=== 1. Clock Port
+
+All time access in `domain/` and `anwendungskern/` goes through the `Clock` port:
+
+[source,python]
+----
+class Clock(Protocol):
+    def jetzt(self) -> str:
+        """Returns current UTC time as ISO-8601: YYYY-MM-DDTHH:MM:SS"""
+        ...
+----
+
+Production code uses `SystemClock` (`adapters/system_clock.py`).
+Tests use `FakeClock` with a constructor-injected fixed string.
+
+No `datetime.now()` call is permitted in `domain/` or `anwendungskern/`.
+
+Evidence: [`ports/clock.py:14-16`, `adapters/system_clock.py:9-13`,
+`tests/fakes.py:1-8`]
+
+=== 2. Audit Atomicity
+
+The audit log write must execute in the same database transaction as the business
+change it records. `SqliteAuditLogRepository.insert()` does not issue a `COMMIT`;
+the caller is responsible for the transaction boundary.
+
+This means:
+* `ausleihe_service.py::gegenstand_ausgeben` writes audit entries after updating item
+  and loan state, all within the same `BEGIN IMMEDIATE` block opened by
+  `AusleiheRepository.insert()`.
+* `PruefabschlussRepository.abschliessen()` includes the `AuditLogEintrag` as one of
+  its six atomically committed writes.
+
+Evidence: [`adapters/persistence/sqlite_audit_log_repository.py:17-29`,
+`anwendungskern/ausleihe_service.py:222-244`,
+`ports/pruefabschluss_repository.py:22-34`]
+
+== Alternatives Considered
+
+=== Pugh Matrix
+
+Criteria: Correctness, Maintainability/Testability, Reliability, Simplicity.
+
+[cols="4,1,1,1,1", options="header"]
+|===
+| Alternative | Correctness | Testability | Reliability | Simplicity
+| *A — `datetime.now()` in services; separate audit transaction* | -1 | -1 | -1 | +1
+| *B — Clock port; audit in same transaction (this decision)* | +1 | +1 | +1 | 0
+| *C — Clock port; async audit queue (eventual consistency)* | 0 | +1 | -1 | -1
+|===
+
+A is strictly worse in correctness, testability and reliability. C introduces
+eventual consistency: audit entries could be missing if the queue fails, which is
+unacceptable for the compliance requirement. B is the only option that satisfies
+all three non-simplicity criteria simultaneously.
+
+== Consequences
+
+*Positive:*
+
+* All date-dependent tests are deterministic. Passing `FakeClock("2026-01-01T09:00:00")`
+  to any service makes the test repeatable regardless of the real date.
+* Audit entries are never missing: if the business change commits, the audit entry
+  commits with it; if either fails, both roll back.
+
+*Negative:*
+
+* Services must accept a `clock` parameter; there is no global singleton.
+  All callers (including the REST adapter) must inject the clock.
+* The "no `datetime.now()`" constraint is currently violated in
+  `anwendungskern/verlaengerung_service.py:122` and
+  `anwendungskern/audit_retention_service.py:58-61`, both of which call methods on
+  the `str` returned by `clock.jetzt()` as if it were a `datetime` — causing runtime
+  `AttributeError`/`TypeError`. These are tracked as TD-01 and TD-02.

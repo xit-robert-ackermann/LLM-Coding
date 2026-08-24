@@ -1,0 +1,983 @@
+= Socratic Code-Theory Recovery — Phase 1: Question Tree
+:bounded-context: src/leihgut/
+:date: 2026-08-24
+:toc: left
+:toclevels: 4
+:icons: font
+:source-highlighter: rouge
+
+Bounded context under analysis: `{bounded-context}` +
+Phase: *1 of 2 — Tree construction only.
+Phase 2 will synthesise PRD, spec, arc42 and ADRs after open questions are answered.*
+
+---
+
+== Q1  What problem does this bounded context solve, and for whom?
+
+The system is called *Leihgut* (German: lent goods).
+It replaces a paper ring-binder and cash-deposit process for the association
+*Bibliothek der Dinge* (Library of Things), which lends tools and equipment to members.
+Known failures of the current process: deposits miscalculated, maintenance-due items
+issued anyway, reservations broken by concurrent extensions.
+
+=== Q1.1  Product identity
+
+[ANSWERED] +
+Name: `Leihgut — Ausleihsystem der Bibliothek der Dinge`. +
+Described as a programming exercise in agentic coding, domain: equipment lending for a
+non-profit association ("Verein"). +
+Evidence: `README.adoc:1`, `pyproject.toml:3`
+
+=== Q1.2  Primary users
+
+[ANSWERED] +
+Three user roles are named in README and enforced in code:
+
+* *Karim, Thekendienst* (counter staff) — issues items, accepts returns, extends loans.
+* *Sabine, Mitglied* (member) — checks availability, places reservations.
+* *Rolf, Werkstattwart* (maintenance technician) — inspects returned items, performs
+  maintenance, retires items, manages training certifications, manages catalogue.
+* *admin* — audit-log administration endpoints.
+
+Evidence: `README.adoc:44-48`, `adapters/rest/app.py:270-274`
+
+=== Q1.3  Channels
+
+[ANSWERED] +
+One channel: REST API (FastAPI, JSON).
+A demo frontend is served as static HTML/JS at `/` by the same FastAPI process.
+Roles are passed as the `X-Rolle` HTTP request header — not authenticated. +
+Evidence: `adapters/rest/app.py:254-268`, `adapters/rest/static/index.html:1`,
+`adapters/rest/rollen.py:7-8`
+
+=== Q1.4  Why built
+
+[ANSWERED] +
+Current process (ring-binder + cash deposit) has documented failure modes:
+deposits miscalculated, maintenance-due items issued, reservations violated by
+concurrent extensions. +
+Evidence: `README.adoc:17-23`
+
+=== Q1.5  Success metrics
+
+[OPEN] +
+Category: business-context +
+Ask role: Product Owner +
+No quantitative success criteria (error-reduction rate, adoption target, transaction
+volume) are derivable from code or README.
+
+=== Q1.6  Segment priority
+
+[OPEN] +
+Category: stakeholder-context +
+Ask role: Product Owner +
+The relative priority between Thekendienst, Mitglied and Wart is not stated.
+Which user's friction matters most when trade-offs arise?
+
+---
+
+== Q2  What is the specification of this bounded context?
+
+=== Q2.1  Actors
+
+[ANSWERED] +
+Five named roles, enforced at the REST boundary:
+
+[cols="1,2,3", options="header"]
+|===
+| Role token | Human role | Permitted use cases
+| `thekendienst` | Counter staff | UC-01 issue, UC-02 extend, UC-03 return
+| `wart` | Maintenance technician | UC-04 inspect, UC-05 maintenance, UC-06 loss,
+UC-07/08 training, UC-09 catalogue
+| `mitglied` | Member | UC-05 reservation
+| `admin` | Administrator | Audit-log stats/cleanup
+| `system` | Internal | Audit retention records
+|===
+
+Evidence: `adapters/rest/app.py:270-274`, `anwendungskern/audit_retention_service.py:103`
+
+=== Q2.2  Use-case catalogue
+
+[ANSWERED] +
+Ten use cases, each mapped to exactly one application service:
+
+[cols="1,2,2", options="header"]
+|===
+| UC-ID | Name | Service file
+| UC-01 | Gegenstand ausgeben (issue item) | `ausleihe_service.py::gegenstand_ausgeben`
+| UC-02 | Ausleihe verlängern (extend loan) | `verlaengerung_service.py::ausleihe_verlaengern`
+| UC-03 | Gegenstand zurücknehmen (return item) | `ausleihe_service.py::gegenstand_zuruecknehmen`
+| UC-04 | Prüfung abschließen (close inspection) | `pruefung_service.py::pruefung_abschliessen`
+| UC-05 | Vormerkung erfassen (place reservation) | `vormerkung_service.py::vormerkung_erfassen`
+| UC-06 | Verlust erfassen (record loss) | `verlust_service.py::verlust_erfassen`
+| UC-07 | Einweisung erfassen (record training) | `einweisung_service.py::einweisung_erfassen`
+| UC-08 | Einweisung widerrufen (revoke training) | `einweisung_service.py::einweisung_widerrufen`
+| UC-09 | Katalog pflegen (manage catalogue) | `katalog_service.py`
+| UC-10 | Verfügbarkeit prüfen (check availability) | `verfuegbarkeit_service.py::verfuegbarkeit_pruefen`
+|===
+
+Evidence: `anwendungskern/` directory, service file docstrings
+
+=== Q2.3  Per-interface system specifications
+
+==== Q2.3.1  SI-01  POST /gegenstaende/{inventarnummer}/ausgabe
+
+[ANSWERED] +
+Role: `thekendienst`. Body: `{mitgliedId: str}`. +
+Success: 201 `{ausleiheId, gegenstandId, mitgliedId, ausgabedatum, rueckgabefrist,
+kautionCent, verlaengert, zustand}`. +
+Errors: 403 ROLLE_NICHT_BERECHTIGT | 404 GEGENSTAND_NICHT_GEFUNDEN |
+409 GEGENSTAND_NICHT_VERFUEGBAR | 409 MITGLIED_GESPERRT |
+409 AUSLEIHLIMIT_ERREICHT | 409 EINWEISUNG_FEHLT. +
+Evidence: `adapters/rest/app.py:435-455`, `anwendungskern/ausleihe_service.py:36-83`
+
+==== Q2.3.2  SI-02  POST /ausleihen/{ausleiheId}/verlaengerung
+
+[ANSWERED] +
+Role: `thekendienst`. No body. +
+Success: 200 `Ausleihe` (same schema as SI-01 response, updated `rueckgabefrist`). +
+Errors: 404 AUSLEIHE_NICHT_GEFUNDEN | 409 AUSLEIHE_UEBERFAELLIG |
+409 VORMERKUNG_OFFEN (stub, see Q5.1.2) | 409 MITGLIED_GESPERRT |
+409 BEREITS_VERLAENGERT. +
+Evidence: `adapters/rest/app.py:498-508`, `anwendungskern/verlaengerung_service.py`
+
+==== Q2.3.3  SI-03  POST /ausleihen/{ausleiheId}/rueckgabe
+
+[ANSWERED] +
+Role: `thekendienst`. Body: `{auffaelligkeiten?: str}`. +
+Success: 200 `Ausleihe` (zustand=`zurueckgegeben`). +
+Errors: 404 AUSLEIHE_NICHT_GEFUNDEN | 409 BEREITS_ZURUECKGEGEBEN. +
+Side effect: item state → `in_pruefung` (BR-RUP-01); first open reservation
+auto-cancelled. +
+Evidence: `adapters/rest/app.py:457-468`, `anwendungskern/ausleihe_service.py:251-313`
+
+==== Q2.3.4  SI-04  POST /ausleihen/{ausleiheId}/pruefprotokoll
+
+[ANSWERED] +
+Role: `wart`. Body: `{neueMaengel: [{beschreibung}], kautionsabzugCent: int≥0,
+zielzustand: "verfuegbar"|"ausgemustert"}`. +
+Success: 201 `{pruefprotokollId, ausleiheId, kautionsabzugCent, neuerGegenstandZustand}`. +
+Errors: 404 AUSLEIHE_NICHT_GEFUNDEN | 409 NICHT_IN_PRUEFUNG |
+422 ABZUG_UEBERSTEIGT_KAUTION. +
+Evidence: `adapters/rest/schemas.py:54-57`, `adapters/rest/app.py:470-496`,
+`anwendungskern/pruefung_service.py`
+
+==== Q2.3.5  SI-05  POST /vormerkungen  |  GET /vormerkungen/{id}
+
+[ANSWERED] +
+POST role: `mitglied`. Body: `{mitgliedId, kategorieId}`.
+Success: 201 `{vormerkungId, mitgliedId, kategorieId, erstelltAm, status, reihenfolge}`. +
+Errors: 404 KATEGORIE_NICHT_GEFUNDEN | 409 MITGLIED_GESPERRT (stub) |
+409 DUPLIKAT_VORMERKUNG. +
+GET role: `thekendienst|mitglied|wart`. Success: 200. Error: 404. +
+Evidence: `adapters/rest/app.py:400-433`
+
+==== Q2.3.6  SI-06  POST /ausleihen/{ausleiheId}/verlust
+
+[ANSWERED] +
+Role: `wart`. No body. +
+Success: 201 `Ausleihe` (zustand=`abgeschlossen_verloren`). +
+Errors: 404 AUSLEIHE_NICHT_GEFUNDEN | 409 AUSLEIHE_NICHT_AKTIV |
+404 GEGENSTAND_NICHT_GEFUNDEN. +
+Side effects: item → `ausgemustert`; `kautionsbewegung` VERLUST_EINZUG = 100%. +
+Evidence: `adapters/rest/app.py:510-520`, `anwendungskern/verlust_service.py`
+
+==== Q2.3.7  SI-Wartung  POST /wartungen
+
+[ANSWERED] +
+Role: `wart`. Body: `{inventarnummer}`. +
+Success: 200 `{inventarnummer, zustand, nutzungszaehler}`. +
+Errors: 404 GEGENSTAND_NICHT_GEFUNDEN | 409 NICHT_WARTUNGSFAELLIG. +
+Evidence: `adapters/rest/app.py:522-536`, `adapters/rest/schemas.py:60-62`
+
+==== Q2.3.8  SI-07/SI-08  POST /einweisungen  |  DELETE /einweisungen/{id}
+
+[ANSWERED] +
+Both role: `wart`. POST body: `{mitgliedId, kategorieId}`. Success: 201 Einweisung. +
+DELETE: 204 on success. +
+Errors: 404 KATEGORIE_NICHT_GEFUNDEN / EINWEISUNG_NICHT_GEFUNDEN |
+409 DUPLIKAT_EINWEISUNG / BEREITS_WIDERRUFEN. +
+Evidence: `adapters/rest/app.py:375-398`
+
+==== Q2.3.9  SI-09  Catalogue endpoints (GET/POST/PUT Kategorien, Gegenstände)
+
+[ANSWERED] +
+Role: `wart` for writes; `thekendienst|mitglied|wart` for GET. +
+5 endpoints: POST /kategorien (201), PUT /kategorien/{id} (200),
+POST /gegenstaende (201), PUT /gegenstaende/{id} (200),
+GET /gegenstaende/{id} (200). +
+Evidence: `adapters/rest/app.py:276-374`
+
+=== Q2.4  Data / entity model
+
+[ANSWERED] +
+9 tables in `adapters/persistence/schema.sql`:
+
+[cols="1,3", options="header"]
+|===
+| Table | Key columns / constraints
+| `kategorie` | PK `kategorie_id`, `leihdauer_tage`, `wartungsintervall`, `einweisungspflichtig`
+| `gegenstand` | PK `inventarnummer`, FK `kategorie_id`, `wiederbeschaffungswert_cent > 0`,
+`nutzungszaehler DEFAULT 0`, `zustand` CHECK 6-value enum
+| `ausleihe` | PK `ausleihe_id` (UUID), FK `gegenstand_id`, text `mitglied_id` (no FK),
+`kaution_cent` snapshot, `verlaengert`, `zustand` CHECK 4-value enum,
+`rueckgabe_auffaelligkeiten`, `mitglied_gesperrt`
+| `einweisung` | PK `einweisung_id`, text `mitglied_id`, FK `kategorie_id`,
+`erstellt_am`, `widerrufen_am` nullable; UNIQUE INDEX on (mitglied_id, kategorie_id)
+WHERE widerrufen_am IS NULL
+| `audit_log` | AUTOINCREMENT `audit_id`, `zeitstempel`, `aggregat`, `aggregat_id`,
+`ereignisart`, `rolle`, `werte_vorher`/`werte_nachher` JSON; immutable via triggers
+| `pruefprotokoll` | PK UUID, FK `ausleihe_id`, `kautionsabzug_cent >= 0`,
+`zielzustand` CHECK 3-value enum
+| `maengel_eintrag` | PK UUID, FK `gegenstand_id`, `beschreibung`, FK
+`festgestellt_in_pruefprotokoll_id`
+| `kautionsbewegung` | PK UUID, FK `ausleihe_id`, `art` CHECK 4-value enum,
+`betrag_cent >= 0`, `ausloeser`
+| `vormerkung` | PK UUID, FK `kategorie_id`, text `mitglied_id`, `status` CHECK 3-value
+enum, `reihenfolge`; UNIQUE INDEX on (mitglied_id, kategorie_id) WHERE status='offen'
+|===
+
+Evidence: `adapters/persistence/schema.sql:12-166`
+
+Note: `mitglied_id` is a plain TEXT field everywhere — no `mitglied` table exists.
+Members are managed outside this bounded context.
+
+=== Q2.5  Acceptance criteria
+
+[OPEN] (partially answered) +
+Category: business-context +
+Ask role: Developer +
+Test files exist for all EPICs and reference UC-IDs and BR-IDs in docstrings
+(`tests/test_epic_a_ausleihe.py`, etc.).
+The README and service file comments reference `*.feature` Gherkin files and
+`spec-acceptance-criteria.adoc` but *these files are not present in the repository*.
+It is unclear whether they were ever written or exist externally. +
+Evidence present: `tests/` (11 test files), `anwendungskern/ausleihe_service.py:7`
+(reference to `spec-acceptance-criteria.adoc`). +
+Evidence missing: `src/docs/specs/spec-acceptance-criteria.adoc`,
+`gegenstand-ausgeben.feature`, `gegenstand-zuruecknehmen.feature`, etc.
+
+=== Q2.6  Cross-cutting business rules
+
+==== Q2.6.1  BR-KAT-01..06  (Catalogue rules)
+
+[ANSWERED] +
+BR-KAT-01: `inventarnummer` unique — `katalog_service.py:144` +
+BR-KAT-02: `leihdauer_tage > 0` and `wartungsintervall > 0` — `katalog_service.py:64-67` +
+BR-KAT-03: `wiederbeschaffungswert_cent > 0` — `katalog_service.py:72-74` +
+BR-KAT-04: Deposit = round(wert × 20%) × 100, bounded [500 ct, 10 000 ct]
+— `domain/kaution.py:7-18` +
+BR-KAT-05: Category change does not affect existing loan's return date (snapshot) +
+BR-KAT-06: Category change affects next inspection's maintenance threshold immediately +
+Evidence for BR-KAT-05/06: `katalog_service.py:109-117`
+
+==== Q2.6.2  BR-AUS-01..09  (Lending rules)
+
+[ANSWERED] +
+BR-AUS-01: Item must be `verfuegbar` OR (`reserviert` AND first open reservation
+belongs to this member) — `ausleihe_service.py:121-130` +
+BR-AUS-02: Member max 3 simultaneous open loans — `ausleihe_service.py:31, 135` +
+BR-AUS-03: Locked member cannot issue — `ausleihe_service.py:133-134` +
+BR-AUS-04: If `einweisungspflichtig`, valid training required — `ausleihe_service.py:137-138` +
+BR-AUS-05: Issuing role recorded in audit — `ausleihe_service.py:222-243` +
+BR-AUS-06: Loan extendable exactly once; new deadline = old deadline + leihdauer_tage
+— `verlaengerung_service.py:138-160` +
+BR-AUS-07: Overdue loan cannot be extended — `verlaengerung_service.py:124-126` +
+BR-AUS-08: Locked member cannot extend — `verlaengerung_service.py:133-135` +
+BR-AUS-09: Deposit unchanged on extension — `verlaengerung_service.py:169`
+
+==== Q2.6.3  BR-SPE-01/02  (Member lock rules)
+
+[ANSWERED] +
+Member locked when at least one active loan has `rueckgabefrist < today` +
+— `domain/ausleihe.py:34-39` (Ausleihe.ist_ueberfaellig), `ausleihe_service.py:162-163`
+
+==== Q2.6.4  BR-RUP-01..06  (Inspection rules)
+
+[ANSWERED] +
+BR-RUP-01: Return sets item to `in_pruefung` — `ausleihe_service.py:285` +
+BR-RUP-04: Inspection closes loan (`abgeschlossen`) — `pruefung_service.py:193` +
+BR-RUP-05: Defect only "new" if its exact description is not already in `maengel_eintrag`
+for that item — `pruefung_service.py:132-145` +
+BR-RUP-06: New defects attributed to current `Pruefprotokoll` via FK
+— `schema.sql:131-132`
+
+==== Q2.6.5  BR-KAU-01..04  (Deposit movement rules)
+
+[ANSWERED] +
+BR-KAU-02: Deduction ≤ original deposit; else 422 — `pruefung_service.py:78-79` +
+BR-KAU-03/04: Loss → 100% VERLUST_EINZUG — `verlust_service.py:125-129` +
+FREIGABE = `kaution_cent − kautionsabzug_cent` created on inspection close
+— `pruefung_service.py:162-171` +
+HINTERLEGUNG type exists in enum but is never created (see Q5.1.5)
+
+==== Q2.6.6  BR-EIN-01..03  (Training rules)
+
+[ANSWERED] +
+BR-EIN-01: At most one valid (non-revoked) training per (member, category)
+— `einweisung_service.py:74-79`; DB enforced via `schema.sql:76-78` +
+BR-EIN-02: Training valid indefinitely until revoked — `domain/einweisung.py:18-20` +
+BR-EIN-03: Revocation is irreversible — `einweisung_service.py:128-134`
+
+==== Q2.6.7  BR-VOR-01..03  (Reservation rules)
+
+[ANSWERED] +
+BR-VOR-01: At most one open reservation per (member, category)
+— `schema.sql:159-162` (unique index) +
+BR-VOR-02: FIFO queue; reihenfolge = count(open) + 1 — `vormerkung_service.py:51-53` +
+BR-VOR-03: After maintenance completion, if open reservation exists → item state
+`reserviert`, otherwise `verfuegbar` — `wartung_service.py:104-110`
+
+==== Q2.6.8  BR-VER-01..03  (Loss rules)
+
+[ANSWERED] +
+BR-VER-01/02: Only active loans can be reported lost; loan → `abgeschlossen_verloren`
+— `verlust_service.py:74-102` +
+BR-VER-03: Item → `ausgemustert` — `verlust_service.py:115-121`
+
+==== Q2.6.9  BR-WAR-01..03  (Maintenance rules)
+
+[ANSWERED] +
+BR-WAR-01: `nutzungszaehler` incremented by 1 on every inspection close
+— `pruefung_service.py:148` +
+BR-WAR-02: If `nutzungszaehler_new ≥ kategorie.wartungsintervall` → `wartungsfaellig`
+(overrides `verfuegbar`; `ausgemustert` override all) — `pruefung_service.py:83-95` +
+BR-WAR-03: Maintenance completion resets `nutzungszaehler → 0`
+— `wartung_service.py:117-119`
+
+---
+
+== Q3  What is the architecture of this bounded context?
+
+=== Q3.1  Introduction and Goals
+
+[ANSWERED] +
+Bounded context name: *Leihgut*. Single deployable Python service.
+Three headline correctness goals motivating the architecture, derivable from README:
+
+1. Deposit always calculated identically (single function, no duplication).
+2. Maintenance threshold never exceeded silently (state machine + usage counter).
+3. Reservation order always honoured (FIFO enforced at DB level).
+
+Evidence: `README.adoc:1-42`, `domain/kaution.py:3-5`
+
+==== Q3.1.1  Quality goals (top-level, see Q4 for full detail)
+
+[ANSWERED] +
+From code structure: correctness (DB constraints duplicate application rules),
+testability (FakeClock, in-memory SQLite, IOSP), traceability (append-only audit log). +
+Evidence: `schema.sql:55-59, 76-78, 159-162`, `tests/fakes.py:1-8`,
+`ausleihe_service.py:5-7`
+
+==== Q3.1.2  Formal stakeholder list
+
+[OPEN] +
+Category: stakeholder-context +
+Ask role: Product Owner +
+No formal stakeholder register derivable from code.
+
+=== Q3.2  Constraints
+
+[ANSWERED] +
+* Python ≥ 3.11 +
+* FastAPI + uvicorn (REST, no GraphQL/gRPC) +
+* SQLite 3 (no external DB) +
+* Single process, no external services +
+* No authentication; roles via `X-Rolle` header +
+* Testable due-date logic via injectable Clock port +
+Evidence: `README.adoc:52-59`, `pyproject.toml:4-11`, `adapters/rest/rollen.py:7-8`
+
+=== Q3.3  Context and scope
+
+==== Q3.3.1  System boundary
+
+[ANSWERED] +
+This system manages: categories, items, loans, inspections, training certifications,
+reservations, maintenance cycles. +
+Out of scope: member management (member IDs are plain text, no FK; no member CRUD UC).
+External: none (README.adoc:57 explicitly states "no external services"). +
+Evidence: `schema.sql:63-64`, `README.adoc:57`
+
+==== Q3.3.2  Origin of mitglied_id
+
+[OPEN] +
+Category: stakeholder-context +
+Ask role: Domain Expert / Product Owner +
+`mitglied_id` is a plain TEXT field throughout (no FK, no member table).
+Where does the calling client obtain valid member IDs? Is there an upstream
+membership system, a shared identity store, or are IDs manually assigned?
+
+=== Q3.4  Solution strategy
+
+[ANSWERED] +
+Four structural decisions, each derivable from code:
+
+1. *Hexagonal architecture* (Ports & Adapters): domain ← anwendungskern ← ports ← adapters. +
+2. *Immutable domain objects*: all entities use `@dataclass(frozen=True)`. +
+3. *Discriminated union results*: application services return `Success | Error1 | Error2`
+   — no exception-based control flow for expected domain failures. +
+4. *IOSP* (Integration-Operation Separation Principle): every service file has a pure
+   `_*_pruefen()` function (no ports) separated from the integration function. +
+
+Evidence: `ausleihe_service.py:1-8`, `domain/gegenstand.py:22`,
+`ausleihe_service.py:77-83`, `katalog_service.py:1-6`
+
+=== Q3.5  Building block view
+
+==== Q3.5.1  Layer structure
+
+[ANSWERED] +
+Four named layers:
+
+----
+domain/          Pure Python dataclasses (frozen); no imports from other layers.
+anwendungskern/  Application services: orchestrate domain + ports. One service per UC.
+ports/           Python Protocol interfaces. One port per aggregate/resource.
+adapters/        REST (FastAPI), persistence (SQLite), clock (SystemClock).
+----
+
+Evidence: `src/leihgut/` directory structure
+
+==== Q3.5.2  Aggregate-to-port mapping
+
+[ANSWERED]
+
+[cols="2,2", options="header"]
+|===
+| Aggregate | Port file
+| Kategorie | `ports/kategorie_repository.py`
+| Gegenstand | `ports/gegenstand_repository.py`
+| Ausleihe | `ports/ausleihe_repository.py`
+| Einweisung | `ports/einweisung_repository.py`
+| Vormerkung | `ports/vormerkung_repository.py`
+| MaengelEintrag | `ports/maengel_repository.py`
+| PruefAbschluss (multi-aggregate) | `ports/pruefabschluss_repository.py`
+| AuditLogEintrag | `ports/audit_log_repository.py`
+| Clock | `ports/clock.py`
+|===
+
+==== Q3.5.3  Dependency direction
+
+[ANSWERED] +
+`domain` ← `anwendungskern` ← `adapters` (via ports). +
+`domain` imports nothing. `anwendungskern` imports only `domain` and `ports`.
+`adapters` imports `anwendungskern`, `domain`, `ports`. +
+Exception: `verlust_service.py:6` imports `sqlite3` directly — a known violation
+(see Q5.1.1). +
+Evidence: import declarations in all service files; `ports/ausleihe_repository.py:11`
+(ADR-002: "domain should not import sqlite3")
+
+=== Q3.6  Runtime view
+
+==== Q3.6.1  UC-01 sequence (issue item)
+
+[ANSWERED] +
+`gegenstand_ausgeben()` call chain (in order):
+`find_by_inventarnummer` → `find_by_id(kategorie)` → `finde_offene_fuer_mitglied`
+→ `find_gueltige_je_mitglied_kategorie` → `find_offene_je_kategorie` (only if RESERVIERT)
+→ `_ausgabe_pruefen()` [pure] → `ausleihe_repo.insert(BEGIN IMMEDIATE)` [may raise
+NebenlaeufigeAusgabeAbgelehnt] → `gegenstand_repo.update()` → `audit_log_repo.insert() ×2`. +
+Evidence: `anwendungskern/ausleihe_service.py:156-246`
+
+==== Q3.6.2  UC-04 atomic commit (close inspection)
+
+[ANSWERED] +
+All six writes for one inspection — Ausleihe update, Gegenstand update, Pruefprotokoll
+insert, MaengelEintrag inserts, Kautionsbewegung inserts, AuditLogEintrag insert —
+are bundled in a single call to `PruefabschlussRepository.abschliessen()` which runs
+one `BEGIN IMMEDIATE … COMMIT` transaction. +
+Evidence: `ports/pruefabschluss_repository.py:22-34`,
+`anwendungskern/pruefung_service.py:216-223`
+
+==== Q3.6.3  Clock usage
+
+[ANSWERED] +
+All time-dependent code calls `clock.jetzt()` which returns an ISO-8601 UTC string
+`YYYY-MM-DDTHH:MM:SS`. Date is extracted by `[:10]`. +
+Evidence: `ports/clock.py:15`, `adapters/system_clock.py:12`,
+`anwendungskern/ausleihe_service.py:162`
+
+=== Q3.7  Deployment view
+
+==== Q3.7.1  Single-process topology
+
+[ANSWERED] +
+One Python process, FastAPI + uvicorn, one SQLite file, no external dependencies. +
+`create_app(conn, clock)` factory receives injected `sqlite3.Connection`; tests pass
+in-memory connections. +
+Evidence: `README.adoc:57`, `adapters/rest/app.py:254-268`
+
+==== Q3.7.2  Entry point and DB path configuration
+
+[OPEN] +
+Category: operational +
+Ask role: Operations / Developer +
+No `main.py`, `__main__.py`, `start.sh`, or `Makefile` target is present in `src/`
+or at repo root. How is the SQLite file path set? How is the application started in
+production?
+
+=== Q3.8  Crosscutting concepts
+
+==== Q3.8.1  Threat model (STRIDE, partial)
+
+[ANSWERED] +
+T-004 and R-001 referenced: the `X-Rolle` header is not cryptographically verified,
+explicitly acknowledged as an accepted risk for this scope. +
+R-002 referenced: SQLite triggers protect audit_log from SQL-level tampering but not
+from file-system access below SQLite. +
+Evidence: `adapters/rest/rollen.py:7-8`, `adapters/persistence/schema.sql:93-95`
+
+[OPEN] +
+Category: design-rationale +
+Ask role: Architect +
+What is the full STRIDE threat catalogue (T-001..T-00n)? The code references T-004
+and R-001/R-002 but no threat model document is present in the repository.
+
+==== Q3.8.2  Security: role enforcement
+
+[ANSWERED] +
+`erfordere_rolle(*erlaubte_rollen)` is a FastAPI Dependency injected into every
+endpoint. It reads `X-Rolle` header, checks against an allowlist, returns 403 +
+`ROLLE_NICHT_BERECHTIGT` on failure. Role is then forwarded to the application service
+for audit attribution. No session, no JWT, no encryption. +
+Evidence: `adapters/rest/rollen.py:13-25`, `adapters/rest/app.py:270-274`
+
+==== Q3.8.3  Test concept
+
+[ANSWERED] +
+Three test levels (IOSP-derived):
+
+1. *Pure operation tests* — call `_*_pruefen()` with domain objects only; no ports,
+   no DB. Fast, no fixtures.
+2. *Integration tests* — call service functions with real SQLite in-memory repository
+   adapters; use `FakeClock`.
+3. *REST endpoint tests* — call via `fastapi.testclient.TestClient` with in-memory
+   SQLite; exercise HTTP status code mapping.
+
+Tests organised by EPIC; each file docstring cites UC-ID and BR-IDs. +
+Evidence: `anwendungskern/ausleihe_service.py:5-7`, `tests/fakes.py:1-8`,
+`tests/test_epic_b_pruefung_kaution.py:1-10`
+
+==== Q3.8.4  Observability
+
+[ANSWERED] +
+Append-only `audit_log` table captures every state change with before/after JSON,
+aggregate type/ID, role, and UTC timestamp. Immutability enforced via DB triggers
+(ADR-009). +
+Retention service documents cleanup as a `retention_cleanup` event inside the same
+log (log never shrinks in current implementation — see Q5.3.4). +
+Evidence: `domain/audit_log.py:12-20`, `schema.sql:82-106`,
+`anwendungskern/audit_retention_service.py:93-119`
+
+[OPEN] +
+Category: quality-goals +
+Ask role: Operations +
+No metrics, no structured logging, no tracing. If the REST process crashes, what is
+the diagnosis path? Are there health check endpoints?
+
+==== Q3.8.5  Error handling
+
+[ANSWERED] +
+Domain failures use discriminated union return types (not exceptions). Each service
+defines its own `*Ablehnung` dataclasses and a union type alias. The REST adapter
+maps types to HTTP status codes via lookup dicts. +
+Infrastructure failures (DB integrity violation on concurrent issue) are caught and
+translated to domain types via `NebenlaeufigeAusgabeAbgelehnt`. +
+Evidence: `anwendungskern/ausleihe_service.py:77-83`,
+`ports/ausleihe_repository.py:7-14`, `adapters/rest/app.py:127-231`
+
+=== Q3.9  Architecture decisions
+
+==== Q3.9.1  Referenced ADRs (inferred from code comments)
+
+[ANSWERED] +
+Four ADRs are referenced by ID in code comments:
+
+[cols="1,3,2", options="header"]
+|===
+| ADR-ID | Decision (inferred from code) | Evidence
+| ADR-002 | Domain layer must not import `sqlite3` | `ports/ausleihe_repository.py:11`
+| ADR-006 | Clock port + audit writes in same transaction | `adapters/rest/app.py:257`,
+`ports/clock.py:1`
+| ADR-007 | BEGIN IMMEDIATE + partial unique index against TOCTOU double-issue |
+`adapters/persistence/sqlite_ausleihe_repository.py:39`, `schema.sql:55-59`
+| ADR-009 | Audit-log immutability via BEFORE UPDATE/DELETE triggers |
+`schema.sql:96-106`
+|===
+
+==== Q3.9.2  ADR documents not in repository
+
+[OPEN] +
+Category: design-rationale +
+Ask role: Architect +
+The code references ADR-002, ADR-006, ADR-007, ADR-009 but no ADR files are present in
+the repository. What does the full set of ADRs contain (ADR-001, ADR-003, ADR-004,
+ADR-005, ADR-008, any beyond ADR-009)?
+
+=== Q3.10  Quality requirements
+
+Handled under Q4.
+
+=== Q3.11  Technical risks and debt
+
+Handled under Q5.
+
+=== Q3.12  Glossary (code-derived)
+
+[ANSWERED] +
+All domain terms are German. The bounded context uses a consistent ubiquitous language
+throughout code, tests, and variable names.
+
+[cols="1,2", options="header"]
+|===
+| Term | Meaning
+| Gegenstand | Physical item in inventory (aggregate)
+| Kategorie | Item category defining loan duration and maintenance interval
+| Ausleihe | Loan / lending transaction (aggregate)
+| Kaution | Refundable deposit (value object, pure function)
+| Kautionsbewegung | Deposit movement record (ABZUG/FREIGABE/VERLUST_EINZUG)
+| Einweisung | Training certification for mandatory-training categories
+| Vormerkung | Reservation / waitlist entry (FIFO per category)
+| Pruefprotokoll | Post-return inspection record
+| Mangel/Maengel | Defect(s) on an item
+| Nutzungszaehler | Usage counter; triggers maintenance when ≥ wartungsintervall
+| Wartungsintervall | Inspections-per-maintenance threshold on a Kategorie
+| Widerruf | Revocation (of an Einweisung)
+| Thekendienst | Counter staff (role)
+| Wart | Maintenance technician (role)
+|===
+
+---
+
+== Q4  What quality goals drive the design?
+
+=== Q4.1  Functional suitability
+
+[ANSWERED] +
+All 10 use cases are implemented. Application-level validation rules are duplicated as
+DB-level constraints (CHECK, unique indexes) as a second barrier. +
+Quality scenario: Given any well-formed input to any endpoint, the returned state
+matches all BR-KAT/BR-AUS/BR-RUP/BR-KAU/BR-EIN/BR-VOR/BR-VER/BR-WAR rules. +
+Evidence: `schema.sql` (all CHECKs and indexes), `anwendungskern/` (all services)
+
+=== Q4.2  Reliability
+
+==== Q4.2.1  TOCTOU protection (concurrent double-issue)
+
+[ANSWERED] +
+Quality scenario: When two requests concurrently issue the same item, exactly one
+succeeds; the other receives 409 GEGENSTAND_NICHT_VERFUEGBAR. Mechanism: `BEGIN
+IMMEDIATE` acquires write lock before insert; partial unique index
+`ux_ausleihe_aktiv_je_gegenstand` is the second barrier; SQLite `IntegrityError`
+is caught and translated to `NebenlaeufigeAusgabeAbgelehnt`. +
+Evidence: `adapters/persistence/sqlite_ausleihe_repository.py:34-60`,
+`schema.sql:55-59`
+
+==== Q4.2.2  Atomic multi-aggregate write (inspection close)
+
+[ANSWERED] +
+Quality scenario: If any write in the inspection-close sequence fails, no partial
+state is committed. Mechanism: `PruefabschlussRepository.abschliessen()` wraps all
+six writes in one `BEGIN IMMEDIATE … COMMIT`. +
+Evidence: `ports/pruefabschluss_repository.py:22-34`
+
+==== Q4.2.3  Audit-log immutability
+
+[ANSWERED] +
+Quality scenario: No application code path can silently UPDATE or DELETE an audit
+entry. Mechanism: SQLite `BEFORE UPDATE` and `BEFORE DELETE` triggers call
+`RAISE(ABORT, …)`. +
+Evidence: `schema.sql:96-106`
+
+==== Q4.2.4  Audit-log effective immutability vs. retention
+
+[ANSWERED] — with known gap (see Q5.3.4) +
+The `cleanup_audit_log()` function writes a `retention_cleanup` record but cannot
+actually delete rows (triggers prevent it). The log grows without bound.
+Evidence: `anwendungskern/audit_retention_service.py:52-55`
+
+=== Q4.3  Usability
+
+[OPEN] +
+Category: quality-goals +
+Ask role: Product Owner +
+No usability targets are in the code. The demo frontend exists
+(`adapters/rest/static/index.html`) but there are no acceptance criteria for response
+time, error message clarity, or UI flows.
+
+=== Q4.4  Performance efficiency
+
+[OPEN] +
+Category: quality-goals +
+Ask role: Product Owner / Architect +
+No response-time SLA, throughput target or latency budget is derivable from the code.
+Context from README: ~400 items, ~800 members, open Tuesdays and Saturdays — very low
+concurrency. SQLite is likely adequate but no target numbers are stated, so they cannot
+be written as [ANSWERED] quality scenarios.
+
+=== Q4.5  Security
+
+[ANSWERED] +
+Quality scenario (preventive): Any request with an absent or unrecognised `X-Rolle`
+header is rejected 403 before any application service is called. +
+Quality scenario (detective): Every state-changing operation produces an immutable
+audit entry with role attribution in the same DB transaction. +
+Known accepted risks: T-004 (roles unverified), R-002 (filesystem-level tampering).
+No encryption, no token auth, no rate limiting. +
+Evidence: `adapters/rest/rollen.py:13-25`, `schema.sql:96-106`, `rollen.py:7-8`
+
+=== Q4.6  Maintainability
+
+==== Q4.6.1  IOSP — Operations/Integration separation
+
+[ANSWERED] +
+Quality scenario: Any validation rule change affects only the `_*_pruefen()` pure
+function; no repository interaction is needed to test it. +
+Metric: Every service file has at least one `_*_pruefen()` Operation and one
+Integration function. +
+Evidence: `ausleihe_service.py:107-139` (`_ausgabe_pruefen`),
+`pruefung_service.py:68-80` (`_pruefung_pruefen`),
+`katalog_service.py:59-75` (`_kategorie_werte_pruefen`)
+
+==== Q4.6.2  Testability via FakeClock
+
+[ANSWERED] +
+Quality scenario: Any date-dependent test runs deterministically without mocking
+`datetime.now`. Mechanism: all services receive a `Clock` port; tests substitute
+`FakeClock("2026-08-18T10:00:00")`. +
+Evidence: `tests/fakes.py:1-8`, `ports/clock.py:14-16`
+
+==== Q4.6.3  Immutable domain objects
+
+[ANSWERED] +
+All domain types use `@dataclass(frozen=True)`. State transitions produce new objects
+rather than mutating existing ones. +
+Evidence: `domain/gegenstand.py:22`, `domain/ausleihe.py:21`,
+`domain/kategorie.py:9`, etc.
+
+=== Q4.7  Portability
+
+==== Q4.7.1  Technology isolation
+
+[ANSWERED] +
+ADR-002: domain never imports `sqlite3`; persistence is isolated behind Ports. +
+Evidence: `ports/ausleihe_repository.py:11`
+
+==== Q4.7.2  Alternative persistence portability
+
+[OPEN] +
+Category: design-rationale +
+Ask role: Architect +
+`BEGIN IMMEDIATE` is SQLite-specific; `verlust_service.py` imports `sqlite3` directly
+(violation of ADR-002). Was portability to PostgreSQL ever considered?
+
+=== Q4.8  Compatibility
+
+[ANSWERED] +
+REST/JSON API. Python ≥ 3.11. Dependencies: fastapi ≥ 0.115, uvicorn ≥ 0.30,
+pydantic ≥ 2.7, httpx ≥ 0.27. No external integration protocols. +
+Evidence: `pyproject.toml:4-11`
+
+=== Q4.9  Priority among quality characteristics
+
+[OPEN] +
+Category: quality-goals +
+Ask role: Product Owner / Architect +
+From code structure, correctness and traceability appear primary (double-barrier rules,
+immutable audit log), testability secondary (IOSP, FakeClock). But no formal priority
+ordering is stated anywhere in the repository.
+
+---
+
+== Q5  What risks and technical debt exist?
+
+=== Q5.1  Technical debt
+
+==== Q5.1.1  UC-09 catalogue writes produce no audit entries
+
+[ANSWERED] +
+`anwendungskern/katalog_service.py` has no import of `AuditLogRepository` and no
+audit writes. `domain/audit_log.py:7` notes UC-01/03/07/08/09 "wrote no audit entries"
+as a known legacy item. UC-01/03/07/08 have since been backfilled, but UC-09
+(kategorie_anlegen, kategorie_aendern, gegenstand_anlegen, gegenstand_wert_aendern)
+still silently mutates the catalogue without any audit trail. +
+Evidence: `anwendungskern/katalog_service.py` (no audit_log import),
+`domain/audit_log.py:7`
+
+==== Q5.1.2  VormerkungOffen check is a stub in verlaengerung_service
+
+[ANSWERED] +
+`anwendungskern/verlaengerung_service.py:131` contains a commented-out line
+`# return VormerkungOffen(ausleihe_id)  # UNCOMMENT mit EPIC-E` and the docstring
+marks this as "DEFERRED zu EPIC-E". The guard is never triggered; a member can extend
+a loan even when another member is waiting for the same category. +
+Evidence: `anwendungskern/verlaengerung_service.py:128-131`
+
+==== Q5.1.3  gesperrte_mitglieder in reservation endpoint is a stub
+
+[ANSWERED] +
+`adapters/rest/app.py:406` passes `gesperrte_mitglieder=[]` as a hardcoded empty list
+with a TODO comment. The lock check inside `vormerkung_service.py::vormerkung_erfassen`
+will never fire for any member. +
+Evidence: `adapters/rest/app.py:406`
+
+==== Q5.1.4  Bug: clock.jetzt().strftime() called on str
+
+[ANSWERED] +
+`anwendungskern/verlaengerung_service.py:122` calls:
+`heute = clock.jetzt().strftime("%Y-%m-%d")` +
+`Clock.jetzt()` returns a `str`, not a `datetime`. Calling `.strftime()` on a string
+will raise `AttributeError` at runtime whenever `ausleihe_verlaengern()` is called. +
+Evidence: `anwendungskern/verlaengerung_service.py:122`,
+`ports/clock.py:15` (return type: `str`)
+
+==== Q5.1.5  HINTERLEGUNG movement type defined but never created
+
+[ANSWERED] +
+`KautionsbewegungArt.HINTERLEGUNG` is present in `domain/kautionsbewegung.py:15` and
+in the DB schema `schema.sql:141`. No code path ever creates a HINTERLEGUNG record.
+The original deposit is tracked only as a `kaution_cent` snapshot on `Ausleihe`, not
+as a ledger entry. +
+Evidence: `domain/kautionsbewegung.py:4-6` (explicit note), `schema.sql:135-136`
+
+==== Q5.1.6  Bug: audit_retention_service.py calls jetzt() as datetime
+
+[ANSWERED] +
+`anwendungskern/audit_retention_service.py:58` assigns `jetzt = clock.jetzt()`, then
+line 61 performs `jetzt - timedelta(days=policy.hot_days)` and line 100 calls
+`jetzt.isoformat()`. Both operations assume `jetzt` is a `datetime` object, but
+`Clock.jetzt()` returns `str`. This will raise `TypeError` at runtime when the cleanup
+endpoint is called. +
+Evidence: `anwendungskern/audit_retention_service.py:58-61, 100`,
+`ports/clock.py:15`
+
+==== Q5.1.7  verlust_service.py directly imports sqlite3 (ADR-002 violation)
+
+[ANSWERED] +
+`anwendungskern/verlust_service.py:6` imports `sqlite3` and at line 49 accepts a raw
+`conn: sqlite3.Connection` parameter. This violates ADR-002 (domain/application layer
+must not import sqlite3) and makes the application service untestable without a real
+SQLite connection. +
+Evidence: `anwendungskern/verlust_service.py:6, 49`
+
+=== Q5.2  Security risks
+
+==== Q5.2.1  T-004  No authentication on role header
+
+[ANSWERED] +
+The `X-Rolle` header is an accepted, documented risk. Any caller can claim any role.
+Mitigation is procedural (internal network only), not technical. +
+Evidence: `adapters/rest/rollen.py:7-8`
+
+==== Q5.2.2  R-002  Audit log file-system access
+
+[ANSWERED] +
+SQLite triggers prevent SQL-level tampering of audit_log but cannot prevent direct
+file-system access to the `.sqlite` file. Acknowledged in schema comment. +
+Evidence: `schema.sql:93-95`
+
+==== Q5.2.3  SQL injection
+
+[ANSWERED] — not a risk +
+All queries use SQLite parameterised placeholders `?` throughout adapters. No string
+concatenation of user input into SQL. +
+Evidence: `adapters/persistence/sqlite_ausleihe_repository.py:18-21`
+
+==== Q5.2.4  No rate limiting
+
+[OPEN] +
+Category: security-risks +
+Ask role: Architect +
+No rate limiting, brute-force protection or DDoS mitigation is visible in the REST
+adapter. Is this acceptable given the intended deployment environment?
+
+=== Q5.3  Operational risks
+
+==== Q5.3.1  No production start script or DB path configuration
+
+[OPEN] +
+Category: operational +
+Ask role: Operations / Developer +
+No `main.py`, `Makefile`, `Dockerfile`, `.env`, or startup documentation exists in
+the repository. How is the SQLite path configured? How is the server started and
+restarted?
+
+==== Q5.3.2  No schema migration tooling
+
+[OPEN] +
+Category: operational +
+Ask role: Operations / Developer +
+`schema.sql` uses `CREATE TABLE IF NOT EXISTS`; there is no migration tool
+(no Alembic, no numbered migration files). Any schema change requires manual DDL
+against the production SQLite file.
+
+==== Q5.3.3  Audit-log cleanup requires manual HTTP call
+
+[ANSWERED] +
+The `POST /admin/audit-log/cleanup` endpoint must be called manually or via an
+external scheduler. No cron job or APScheduler integration exists in the codebase.
+The docstring acknowledges this: "Täglich über Scheduler (z.B. Celery, APScheduler)
+— Oder manuell via REST Endpoint". +
+Evidence: `anwendungskern/audit_retention_service.py:14-15`
+
+==== Q5.3.4  Audit log grows without bound (cleanup logic broken)
+
+[ANSWERED] +
+`cleanup_audit_log()` cannot actually delete rows because ADR-009 triggers reject
+DELETE. Instead it writes a `retention_cleanup` record to document the intended
+deletion. The old rows remain. The function returns `deleted_count` that counts
+rows it would have deleted, but they are never actually removed. +
+Evidence: `anwendungskern/audit_retention_service.py:52-55, 63-74, 93-119`
+
+=== Q5.4  Dependency / supply-chain risks
+
+==== Q5.4.1  Dependency footprint is small
+
+[ANSWERED] +
+5 production dependencies, all well-maintained and widely used:
+fastapi ≥ 0.115, uvicorn ≥ 0.30, pydantic ≥ 2.7, typer ≥ 0.12, httpx ≥ 0.27. +
+Evidence: `pyproject.toml:6-11`
+
+==== Q5.4.2  No lockfile / version pinning
+
+[OPEN] +
+Category: operational +
+Ask role: Operations / Developer +
+No `requirements.lock`, `pip-compile` output or `poetry.lock` exists. Only lower-bound
+version constraints. Reproducible installs depend on upstream package stability.
+
+==== Q5.4.3  typer listed but no CLI implemented
+
+[ANSWERED] +
+`pyproject.toml:10` lists `typer >= 0.12`. `README.adoc:52` mentions a CLI for
+maintenance-technician tasks but no CLI module exists in `src/`. The dependency is
+dead weight in the current state. +
+Evidence: `pyproject.toml:10`, `README.adoc:52`
+
+=== Q5.5  Scaling / performance risks
+
+==== Q5.5.1  SQLite write serialisation ceiling
+
+[ANSWERED] +
+`BEGIN IMMEDIATE` serialises all writes. Adequate for stated scale (400 items,
+800 members, twice-weekly operation) but rules out high-concurrency or multi-node
+deployments without architectural change. +
+Evidence: `README.adoc:16`, `adapters/persistence/sqlite_ausleihe_repository.py:39`
+
+==== Q5.5.2  Unbounded query results
+
+[ANSWERED] +
+`finde_offene_fuer_mitglied()` fetches all open loans for a member without a limit.
+At the stated scale (max 3 loans per member) this is harmless; at higher scale it
+could become a problem. +
+Evidence: `adapters/persistence/sqlite_ausleihe_repository.py:26-32`
+
+==== Q5.5.3  Audit log storage growth
+
+[ANSWERED] +
+Every UC-01 issue produces 2 audit entries; every UC-03 return produces 2; UC-04
+inspection 1; UC-06 loss 2; UC-07/08 training 1 each. Estimated 200 bytes/entry
+(from code comment). No automatic deletion mechanism works (see Q5.3.4). Growth is
+unbounded over time. +
+Evidence: `anwendungskern/audit_retention_service.py:187-188`,
+`anwendungskern/ausleihe_service.py:222-243`

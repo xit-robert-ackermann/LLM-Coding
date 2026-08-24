@@ -1,0 +1,85 @@
+= leihgut-ADR-002: Domain and Application Layer Must Not Import sqlite3
+:status: Accepted
+:date: 2026-08-24
+:deciders: Architecture team
+:toc: left
+:icons: font
+
+== Status
+
+Accepted +
+_(Known violation: `anwendungskern/verlust_service.py:6` — see Consequences.)_
+
+== Context
+
+The system uses a Hexagonal Architecture (Ports and Adapters) with the intent of
+keeping the domain and application layers free from infrastructure concerns.
+SQLite is the current persistence technology, but the architecture must allow
+persistence adapters to be replaced without touching business logic.
+
+Python's `sqlite3` module is a standard-library module. Nothing prevents it from
+being imported in any layer. However, importing it in domain or application code
+creates an implicit coupling to SQLite-specific behaviour (exception types, transaction
+semantics, column cursor types) that would break if the adapter were replaced.
+
+The specific trigger: in `pruefung_service.py`, the original design required
+multi-aggregate atomic writes. The temptation was to accept a raw `sqlite3.Connection`
+in the service. The decision was instead to define a dedicated port
+`PruefabschlussRepository` that bundles all writes into one method call, keeping
+the service free of any `sqlite3` reference.
+[`ports/pruefabschluss_repository.py:1-10`]
+
+== Decision
+
+The domain layer (`domain/`) and application layer (`anwendungskern/`) must not
+import `sqlite3` or any other persistence-technology module.
+
+Any infrastructure exception (e.g., `sqlite3.IntegrityError`) must be caught in
+the adapter and translated to a framework-agnostic domain exception before being
+propagated to the application layer.
+
+Evidence of this principle applied:
+* `NebenlaeufigeAusgabeAbgelehnt` is a plain Python exception defined in
+  `ports/ausleihe_repository.py` (not in the sqlite3 adapter) and caught by the
+  application service without any sqlite3 import.
+  [`ports/ausleihe_repository.py:7-14`]
+
+== Alternatives Considered
+
+=== Pugh Matrix
+
+Criteria drawn from Q4 quality goals: Maintainability (testability), Reliability,
+Correctness, Portability.
+
+[cols="3,1,1,1,1", options="header"]
+|===
+| Alternative | Maintainability | Reliability | Correctness | Portability
+| *A — Accept sqlite3 in all layers* | -1 | 0 | 0 | -1
+| *B — This decision: sqlite3 only in adapters* | +1 | 0 | 0 | +1
+| *C — ORM (e.g., SQLAlchemy) in application layer* | 0 | 0 | 0 | 0
+|===
+
+A is worse: application services become untestable without a real SQLite connection;
+portability is lost. C neither helps nor hurts maintainability significantly; an ORM
+was not chosen because it would add a dependency and ORM query objects would still
+couple the application layer to infrastructure types. B gives the cleanest boundary.
+
+== Consequences
+
+*Positive:*
+
+* Application services are testable with any in-memory fake that satisfies the port
+  `Protocol`.
+* The persistence adapter can be replaced (e.g., PostgreSQL) by implementing the same
+  port interfaces.
+* SQLite-specific exceptions are translated at the boundary; the application layer
+  handles only domain exceptions.
+
+*Negative / Known Violation:*
+
+* `anwendungskern/verlust_service.py:6` imports `sqlite3` directly and accepts a raw
+  `conn: sqlite3.Connection` parameter. This violates the decision. The service was
+  written after the decision and bypassed the `PruefabschlussRepository` pattern.
+  It must be refactored to use a dedicated `VerlustabschlussRepository` port or
+  inline into the adapter, consistent with this ADR.
+  [`anwendungskern/verlust_service.py:6, 49`]

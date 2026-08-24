@@ -1,0 +1,125 @@
+= leihgut-ADR-007: BEGIN IMMEDIATE and Partial Unique Index Against TOCTOU Double-Issue
+:status: Accepted
+:date: 2026-08-24
+:toc: left
+:icons: font
+
+== Status
+
+Accepted
+
+== Context
+
+UC-01 (issue item) follows a classic check-then-act pattern:
+
+. *Read*: load item from DB; verify state = `verfuegbar`.
+. *Write*: insert `Ausleihe`; update item state to `ausgeliehen`.
+
+Between steps 1 and 2, a second concurrent request can perform the same check
+and also see `verfuegbar` — a TOCTOU (Time-Of-Check-Time-Of-Use) race. Without
+a guard, both requests would succeed, resulting in two active loans for the same
+item simultaneously.
+
+SQLite's default journal mode (`WAL` or legacy) does not prevent this: a read
+transaction does not block other readers, and by the time the writer commits,
+the second reader has already passed the check.
+
+The scale context (400 items, 800 members, open twice per week) suggests that
+true concurrent requests will be rare. However, correctness must be guaranteed
+regardless of frequency — the system's primary goal is to prevent exactly this
+class of error (see Problem Statement in PRD).
+
+== Decision
+
+Two independent, complementary mechanisms are applied:
+
+=== Mechanism 1: BEGIN IMMEDIATE on insert
+
+`SqliteAusleiheRepository.insert()` opens the transaction with `BEGIN IMMEDIATE`
+rather than the default `BEGIN DEFERRED`. This acquires the write lock at the
+start of the transaction, before the INSERT statement is issued.
+
+[source,python]
+----
+def insert(self, ausleihe: Ausleihe) -> None:
+    self._conn.execute("BEGIN IMMEDIATE")
+    try:
+        self._conn.execute("INSERT INTO ausleihe ...")
+        self._conn.commit()
+    except sqlite3.IntegrityError as exc:
+        self._conn.rollback()
+        raise NebenlaeufigeAusgabeAbgelehnt(ausleihe.gegenstand_id) from exc
+----
+
+Evidence: [`adapters/persistence/sqlite_ausleihe_repository.py:34-60`]
+
+Effect: If two concurrent requests reach `insert()` simultaneously, the second
+one blocks waiting for the write lock. When it acquires the lock, the first
+transaction has already committed, so the unique-index guard (Mechanism 2) fires.
+
+=== Mechanism 2: Partial unique index
+
+A database-level partial unique index enforces that at most one active loan exists
+per item, independent of application code:
+
+[source,sql]
+----
+CREATE UNIQUE INDEX IF NOT EXISTS ux_ausleihe_aktiv_je_gegenstand
+    ON ausleihe (gegenstand_id)
+    WHERE zustand = 'aktiv';
+----
+
+Evidence: [`schema.sql:55-59`]
+
+If two concurrent writes both insert an `aktiv` loan for the same `gegenstand_id`,
+the second raises `sqlite3.IntegrityError`. The adapter catches this and raises
+`NebenlaeufigeAusgabeAbgelehnt`, which the application service translates to
+`GegenstandNichtVerfuegbar`.
+
+Evidence of the error translation: [`ports/ausleihe_repository.py:7-14`,
+`anwendungskern/ausleihe_service.py:206-211`]
+
+The two mechanisms are complementary: `BEGIN IMMEDIATE` reduces lock contention by
+serialising write attempts early; the unique index is the second, data-integrity
+barrier that survives even if the application-level check is ever bypassed.
+
+== Alternatives Considered
+
+=== Pugh Matrix
+
+Criteria: Reliability (double-issue prevention), Correctness, Simplicity,
+Maintainability.
+
+[cols="4,1,1,1,1", options="header"]
+|===
+| Alternative | Reliability | Correctness | Simplicity | Maintainability
+| *A — No guard (check-then-act, hope for no concurrency)* | -1 | -1 | +1 | +1
+| *B — Application-level mutex (threading.Lock)* | 0 | 0 | 0 | -1
+| *C — Optimistic locking (version column + re-check)* | 0 | 0 | -1 | -1
+| *D — BEGIN IMMEDIATE + unique index (this decision)* | +1 | +1 | 0 | 0
+|===
+
+A is ruled out: correctness is the primary goal. B (process-level mutex) fails across
+processes and is not composable with uvicorn's threading model. C (optimistic locking)
+requires a version column, a re-read loop, and retry logic — significant complexity
+with no benefit over D at SQLite scale. D uses SQLite's own locking semantics, has no
+extra application state, and the unique index also documents the invariant in the schema.
+
+== Consequences
+
+*Positive:*
+
+* Double-issue is provably impossible — the invariant is enforced at the data level.
+* The unique index self-documents the business rule "at most one active loan per item".
+* `NebenlaeufigeAusgabeAbgelehnt` is a named, testable failure path in the application
+  layer.
+
+*Negative:*
+
+* `BEGIN IMMEDIATE` serialises all inserts to `ausleihe`. Under very high throughput
+  this would be a bottleneck. At the stated scale (400 items, twice weekly) this is
+  not a concern.
+* The pattern is SQLite-specific. Porting to PostgreSQL would require adapting to
+  `SELECT FOR UPDATE` or `ON CONFLICT` semantics.
+* `verlust_service.py` opens its own `BEGIN IMMEDIATE` directly via a raw
+  `sqlite3.Connection`, bypassing the port abstraction — this is tracked as TD-06.

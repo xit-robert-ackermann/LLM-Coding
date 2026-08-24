@@ -1,0 +1,1012 @@
+= Leihgut — Use Cases and Specification
+:version: 1.0
+:date: 2026-08-24
+:toc: left
+:toclevels: 4
+:icons: font
+
+== Part 1  Persona Use Cases (Cockburn Fully Dressed)
+
+All use-case narratives are at the *User Goal* level.
+System-level details (HTTP method, status codes, exact validation sequence) are
+covered in Part 2 (System Use Cases / Interface Specifications).
+
+---
+
+=== UC-01  Gegenstand ausgeben (Issue Item)
+
+==== Primary Actor
+Karim — Thekendienst (counter staff)
+
+==== Trigger
+A member presents at the counter and requests to borrow an item.
+
+==== Stakeholders and Interests
+* *Counter staff* — needs a fast, unambiguous decision; cannot calculate rules manually.
+* *Member* — wants to borrow the item.
+* *Association* — wants deposit collected correctly; wants only eligible members
+  to borrow; wants maintenance-due items held back.
+
+==== Preconditions
+* The item exists in the system.
+* The member ID is known to the caller.
+
+==== Main Success Scenario
+. Counter staff enters the inventory number and the member ID.
+. System checks the item is available (or reserved for this member).
+. System checks the member is not locked (no overdue active loan).
+. System checks the member has not reached the 3-loan limit.
+. System checks the member has a valid training certification if the item category
+  requires one.
+. System records the loan with today's issue date, calculates the return deadline
+  (`today + leihdauer_tage`), and calculates the deposit (20 % of replacement value,
+  rounded to whole euros, bounded €5–€100).
+. System transitions the item state to _ausgeliehen_ (on loan).
+. System writes two audit entries: one for the item state change, one for the new loan.
+. System returns the loan details including deposit amount and return deadline.
+. Counter staff confirms the deposit with the member and issues the item.
+
+==== Extensions
+
+===== 2a — Item not in system
+System returns 404. Counter staff checks the inventory number.
+
+===== 2b — Item not available
+Item is in a state other than _verfuegbar_ or _reserviert-for-this-member_.
+System returns 409. Counter staff explains to the member.
+
+===== 3a — Member locked (overdue loan)
+System returns 409 MITGLIED_GESPERRT.
+Counter staff asks the member to return the overdue item first.
+
+===== 4a — Loan limit reached
+Member already has 3 open loans. System returns 409 AUSLEIHLIMIT_ERREICHT.
+
+===== 5a — Training certification missing
+Item category requires training; member has no valid certification.
+System returns 409 EINWEISUNG_FEHLT. Counter staff arranges training.
+
+===== Concurrent issue
+Two counter stations attempt to issue the same item simultaneously. The second
+request is rejected with 409 GEGENSTAND_NICHT_VERFUEGBAR (TOCTOU guard).
+
+==== Postconditions
+* One `Ausleihe` record exists with state _aktiv_.
+* Item state is _ausgeliehen_.
+* Two `AuditLogEintrag` records have been appended.
+
+==== Business Rules
+BR-AUS-01, BR-AUS-02, BR-AUS-03, BR-AUS-04, BR-AUS-05, BR-KAT-04, BR-SPE-02
+
+---
+
+=== UC-02  Ausleihe verlängern (Extend Loan)
+
+==== Primary Actor
+Karim — Thekendienst
+
+==== Trigger
+A member requests an extension before the return deadline passes.
+
+==== Preconditions
+* The loan exists and is in state _aktiv_.
+* The loan has not been extended before.
+* The member is not locked.
+* The return deadline has not passed.
+* No open reservation exists for the item's category.
+
+==== Main Success Scenario
+. Counter staff enters the loan ID.
+. System verifies the loan is active and not overdue.
+. System verifies no open reservation exists for the category (deferred — see TD-03).
+. System verifies the member is not locked.
+. System verifies the loan has not been previously extended.
+. System calculates the new return deadline:
+  `current_rueckgabefrist + leihdauer_tage` (deposit unchanged per BR-AUS-09).
+. System updates the loan, marking `verlaengert = true`.
+. System returns the updated loan.
+
+==== Extensions
+
+===== 2a — Loan overdue
+System returns 409 AUSLEIHE_UEBERFAELLIG.
+
+===== 3a — Open reservation
+System returns 409 VORMERKUNG_OFFEN. _(Guard is currently a stub — TD-03.)_
+
+===== 4a — Member locked
+System returns 409 MITGLIED_GESPERRT.
+
+===== 5a — Already extended
+System returns 409 BEREITS_VERLAENGERT.
+
+==== Postconditions
+* Loan `rueckgabefrist` updated; `verlaengert = true`.
+* Deposit amount unchanged.
+
+==== Business Rules
+BR-AUS-06, BR-AUS-07, BR-AUS-08, BR-AUS-09
+
+---
+
+=== UC-03  Gegenstand zurücknehmen (Return Item)
+
+==== Primary Actor
+Karim — Thekendienst
+
+==== Trigger
+A member returns a borrowed item at the counter.
+
+==== Preconditions
+* The loan exists and is in state _aktiv_.
+
+==== Main Success Scenario
+. Counter staff enters the loan ID and optional damage notes.
+. System marks the loan as _zurueckgegeben_.
+. System transitions the item state to _in_pruefung_ (awaiting inspection).
+. System cancels the first open reservation for the item's category (if any).
+. System writes two audit entries (loan state, item state).
+. System returns the updated loan.
+
+==== Extensions
+
+===== 2a — Loan not found
+System returns 404 AUSLEIHE_NICHT_GEFUNDEN.
+
+===== 2b — Loan already returned or closed
+System returns 409 BEREITS_ZURUECKGEGEBEN.
+
+==== Postconditions
+* Loan state is _zurueckgegeben_.
+* Item state is _in_pruefung_.
+* First open `Vormerkung` for this category is set to _automatisch_abgesagt_.
+* Two `AuditLogEintrag` records appended.
+
+==== Business Rules
+BR-RUP-01, BR-VOR-02
+
+---
+
+=== UC-04  Prüfung abschließen (Close Inspection)
+
+==== Primary Actor
+Rolf — Werkstattwart (maintenance technician)
+
+==== Trigger
+A returned item has been physically inspected by the technician.
+
+==== Preconditions
+* The loan exists in state _zurueckgegeben_.
+* The associated item is in state _in_pruefung_.
+
+==== Main Success Scenario
+. Technician enters the loan ID, lists any newly discovered defects, enters the
+  deposit deduction (0 if no damage), and selects the target item state
+  (_verfuegbar_ or _ausgemustert_).
+. System verifies the item is in state _in_pruefung_.
+. System verifies the deposit deduction does not exceed the held deposit.
+. System determines which reported defects are new (not already in the item's
+  defect list) and creates `MaengelEintrag` records for them.
+. System increments the item's usage counter by 1.
+. System determines the effective next state:
+  * _ausgemustert_ if the technician selected it;
+  * _wartungsfaellig_ if `nutzungszaehler ≥ kategorie.wartungsintervall`;
+  * _verfuegbar_ otherwise.
+. System creates the `Pruefprotokoll`, `Kautionsbewegung` records (FREIGABE of
+  `kaution − deduction`; ABZUG of deduction if > 0), and `AuditLogEintrag`.
+. System closes the loan (_abgeschlossen_) and transitions the item to the
+  determined next state.
+. All writes are committed atomically.
+
+==== Extensions
+
+===== 2a — Item not in_pruefung
+System returns 409 NICHT_IN_PRUEFUNG.
+
+===== 3a — Deduction exceeds deposit
+System returns 422 ABZUG_UEBERSTEIGT_KAUTION.
+
+==== Postconditions
+* Loan state is _abgeschlossen_.
+* Item state is one of {_verfuegbar_, _wartungsfaellig_, _ausgemustert_}.
+* New `MaengelEintrag` records exist for genuinely new defects.
+* `Pruefprotokoll` exists referencing the loan.
+* One or two `Kautionsbewegung` records exist (FREIGABE always; ABZUG if deduction > 0).
+* One `AuditLogEintrag` appended.
+* All records committed atomically.
+
+==== Business Rules
+BR-RUP-03, BR-RUP-04, BR-RUP-05, BR-RUP-06, BR-KAU-02, BR-KAU-04, BR-WAR-01, BR-WAR-02
+
+---
+
+=== UC-05  Wartung abschließen (Complete Maintenance)
+
+==== Primary Actor
+Rolf — Werkstattwart
+
+==== Trigger
+Maintenance work on an item is complete.
+
+==== Preconditions
+* The item is in state _wartungsfaellig_.
+
+==== Main Success Scenario
+. Technician enters the inventory number.
+. System verifies the item is in state _wartungsfaellig_.
+. System resets the usage counter to 0.
+. System checks whether there is an open reservation for the item's category.
+. System transitions the item to _reserviert_ if a reservation exists, or
+  to _verfuegbar_ otherwise.
+. System writes an audit entry.
+
+==== Extensions
+
+===== 2a — Item not wartungsfaellig
+System returns 409 NICHT_WARTUNGSFAELLIG.
+
+==== Postconditions
+* Item `nutzungszaehler = 0`.
+* Item state is _verfuegbar_ or _reserviert_.
+* One `AuditLogEintrag` appended.
+
+==== Business Rules
+BR-WAR-03, BR-VOR-03
+
+---
+
+=== UC-06  Verlust erfassen (Record Loss)
+
+==== Primary Actor
+Rolf — Werkstattwart
+
+==== Trigger
+An item is reported or confirmed lost while on loan.
+
+==== Preconditions
+* The loan is in state _aktiv_.
+
+==== Main Success Scenario
+. Technician enters the loan ID.
+. System verifies the loan is active.
+. System marks the loan as _abgeschlossen_verloren_.
+. System retires the item (_ausgemustert_).
+. System records a VERLUST_EINZUG `Kautionsbewegung` for 100 % of the held deposit.
+. System writes audit entries for the loan and item state changes.
+
+==== Extensions
+
+===== 2a — Loan not active
+System returns 409 AUSLEIHE_NICHT_AKTIV.
+
+==== Postconditions
+* Loan state is _abgeschlossen_verloren_.
+* Item state is _ausgemustert_.
+* One `Kautionsbewegung` of type VERLUST_EINZUG equals the full deposit amount.
+* Two `AuditLogEintrag` records appended.
+
+==== Business Rules
+BR-VER-01, BR-VER-02, BR-VER-03, BR-KAU-03, BR-KAU-04
+
+---
+
+=== UC-07  Einweisung erfassen (Record Training Certification)
+
+==== Primary Actor
+Rolf — Werkstattwart
+
+==== Trigger
+A member has completed required training for an item category.
+
+==== Preconditions
+* The category exists in the system.
+* No valid (non-revoked) training certification exists for this member/category pair.
+
+==== Main Success Scenario
+. Technician enters the member ID and category ID.
+. System verifies the category exists.
+. System verifies no current valid certification exists for this pair.
+. System creates the `Einweisung` record (valid indefinitely until revoked).
+. System writes an audit entry.
+
+==== Extensions
+
+===== 2a — Category not found
+System returns 404.
+
+===== 3a — Certification already exists
+System returns 409 DUPLIKAT_EINWEISUNG.
+
+==== Postconditions
+* One `Einweisung` record with `widerrufen_am = NULL` exists for (mitglied_id, kategorie_id).
+
+==== Business Rules
+BR-EIN-01, BR-EIN-02
+
+---
+
+=== UC-08  Einweisung widerrufen (Revoke Training Certification)
+
+==== Primary Actor
+Rolf — Werkstattwart
+
+==== Trigger
+A training certification must be invalidated (member no longer qualified).
+
+==== Preconditions
+* The certification exists and has not already been revoked.
+
+==== Main Success Scenario
+. Technician enters the certification ID.
+. System verifies the certification exists and is not yet revoked.
+. System sets `widerrufen_am` to the current timestamp.
+. System writes an audit entry.
+
+==== Extensions
+
+===== 2a — Certification not found
+System returns 404.
+
+===== 2b — Already revoked
+System returns 409 BEREITS_WIDERRUFEN.
+
+==== Postconditions
+* `Einweisung.widerrufen_am` is set to the revocation timestamp.
+* The certification no longer counts as valid for future loan checks.
+
+==== Business Rules
+BR-EIN-03
+
+---
+
+=== UC-09  Katalog pflegen (Manage Catalogue)
+
+==== Primary Actor
+Rolf — Werkstattwart
+
+==== Trigger
+A new item category or physical item must be added, or an existing one updated.
+
+==== Preconditions
+* For category changes: the category exists.
+* For item creation: the inventory number does not already exist.
+
+==== Main Success Scenario
+. Technician creates or updates a category or item via the respective endpoint.
+. System validates all field rules (see BR-KAT-01 through BR-KAT-04).
+. System persists the change.
+
+NOTE: Catalogue changes currently produce no audit entries (TD-05).
+
+==== Business Rules
+BR-KAT-01, BR-KAT-02, BR-KAT-03, BR-KAT-04, BR-KAT-05, BR-KAT-06
+
+---
+
+=== UC-10  Verfügbarkeit prüfen (Check Availability)
+
+==== Primary Actor
+Sabine — Mitglied (member), or Karim — Thekendienst
+
+==== Trigger
+A member or counter staff wants to know whether an item is available before visiting.
+
+==== Preconditions
+* The item exists in the system.
+
+==== Main Success Scenario
+. Caller enters the inventory number.
+. System returns the item's current state and category ID.
+
+==== Extensions
+
+===== 2a — Item not found
+System returns 404.
+
+==== Business Rules
+_None beyond existence check._
+
+---
+
+=== UC-11  Vormerkung erfassen (Place Reservation)
+
+==== Primary Actor
+Sabine — Mitglied
+
+==== Trigger
+A member wants to reserve a category when all items of that category are currently
+on loan.
+
+==== Preconditions
+* The category exists.
+* The member is not locked (guard is currently a stub — TD-04).
+* No open reservation exists for this member/category pair.
+
+==== Main Success Scenario
+. Member enters their member ID and the category ID.
+. System verifies the category exists.
+. System verifies the member has no existing open reservation for the category.
+. System assigns the next queue position (FIFO: `count(open) + 1`).
+. System creates the `Vormerkung` with status _offen_.
+
+==== Extensions
+
+===== 2a — Category not found
+System returns 404.
+
+===== 3a — Duplicate reservation
+System returns 409 DUPLIKAT_VORMERKUNG.
+
+==== Postconditions
+* One `Vormerkung` exists with status _offen_, queue position assigned.
+
+==== Business Rules
+BR-VOR-01, BR-VOR-02
+
+---
+
+== Part 2  System Use Cases (Interface Specifications)
+
+The REST API is the only channel.
+All endpoints require the `X-Rolle` HTTP header.
+Every error response has the form `{"fehlercode": "SNAKE_CASE_CONSTANT"}`.
+
+=== Common error codes (all endpoints)
+
+[cols="1,1,3", options="header"]
+|===
+| HTTP | Code | Condition
+| 403 | ROLLE_NICHT_BERECHTIGT | `X-Rolle` header absent or not in the allowlist for this endpoint
+[`adapters/rest/rollen.py:13-25`]
+|===
+
+---
+
+=== SI-01  POST /gegenstaende/{inventarnummer}/ausgabe
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| Roles allowed | `thekendienst`
+| Request body | `{"mitgliedId": string}`
+| Success | 201 — `{ausleiheId, gegenstandId, mitgliedId, ausgabedatum, rueckgabefrist, kautionCent, verlaengert, zustand}`
+|===
+
+*Validation and processing sequence* [`anwendungskern/ausleihe_service.py:156-246`]:
+
+. Resolve item by `inventarnummer` → 404 if not found.
+. Resolve category for item.
+. Load all open loans for the member (states `aktiv` or `zurueckgegeben`).
+. Derive member-lock: any loan with `rueckgabefrist < today AND zustand = aktiv`.
+. Check training certification if `einweisungspflichtig`.
+. If item state is `reserviert`, load first open reservation and verify it belongs to this member.
+. Run `_ausgabe_pruefen()` (pure): checks BR-AUS-01 → BR-AUS-04 in order.
+. On first failure: return the corresponding 409.
+. On pass: persist loan with `BEGIN IMMEDIATE`; catch concurrent-insert error → 409 GEGENSTAND_NICHT_VERFUEGBAR.
+. Update item state to `ausgeliehen`.
+. Append two `AuditLogEintrag` records.
+
+*Error responses*:
+
+[cols="1,2,3", options="header"]
+|===
+| HTTP | Code | Rule
+| 404 | GEGENSTAND_NICHT_GEFUNDEN | Item not in system
+| 409 | GEGENSTAND_NICHT_VERFUEGBAR | BR-AUS-01: item not available / not reserved for this member
+| 409 | MITGLIED_GESPERRT | BR-AUS-03: member has an overdue loan
+| 409 | AUSLEIHLIMIT_ERREICHT | BR-AUS-02: member has 3 open loans
+| 409 | EINWEISUNG_FEHLT | BR-AUS-04: category requires training; member has none
+|===
+
+---
+
+=== SI-02  POST /ausleihen/{ausleiheId}/verlaengerung
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| Roles allowed | `thekendienst`
+| Request body | _(empty)_
+| Success | 200 — same schema as SI-01 response, with updated `rueckgabefrist` and `verlaengert: true`
+|===
+
+*Validation and processing sequence* [`anwendungskern/verlaengerung_service.py:102-175`]:
+
+. Find loan by ID, verify state = `aktiv` → 404 if not found or not active.
+. Check `rueckgabefrist < today` → 409 AUSLEIHE_UEBERFAELLIG.
+. Check open reservations for category → 409 VORMERKUNG_OFFEN _(stub, TD-03)_.
+. Check `mitglied_gesperrt` → 409 MITGLIED_GESPERRT.
+. Check `verlaengert` → 409 BEREITS_VERLAENGERT.
+. Compute `neue_rueckgabefrist = old_rueckgabefrist + leihdauer_tage`.
+. Persist updated loan; deposit unchanged.
+
+NOTE: This endpoint contains a runtime bug (TD-01): `clock.jetzt()` returns a `str`
+but the service calls `.strftime()` on it [`anwendungskern/verlaengerung_service.py:122`].
+
+*Error responses*:
+
+[cols="1,2,3", options="header"]
+|===
+| HTTP | Code | Rule
+| 404 | AUSLEIHE_NICHT_GEFUNDEN | Loan not found or not active
+| 409 | AUSLEIHE_UEBERFAELLIG | BR-AUS-07: past deadline
+| 409 | VORMERKUNG_OFFEN | BR-AUS-07: open reservation exists (stub)
+| 409 | MITGLIED_GESPERRT | BR-AUS-08
+| 409 | BEREITS_VERLAENGERT | BR-AUS-06
+|===
+
+---
+
+=== SI-03  POST /ausleihen/{ausleiheId}/rueckgabe
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| Roles allowed | `thekendienst`
+| Request body | `{"auffaelligkeiten": string \| null}`
+| Success | 200 — same schema as SI-01
+|===
+
+*Validation and processing sequence* [`anwendungskern/ausleihe_service.py:251-313`]:
+
+. Find loan by ID → 404 if not found.
+. Verify `zustand = aktiv` → 409 BEREITS_ZURUECKGEGEBEN.
+. Update loan: `zustand = zurueckgegeben`, copy `auffaelligkeiten`.
+. Update item: `zustand = in_pruefung` (BR-RUP-01).
+. Cancel first open reservation for category (automatic FIFO management).
+. Append two `AuditLogEintrag` records.
+
+*Error responses*:
+
+[cols="1,2", options="header"]
+|===
+| HTTP | Code
+| 404 | AUSLEIHE_NICHT_GEFUNDEN
+| 409 | BEREITS_ZURUECKGEGEBEN
+|===
+
+---
+
+=== SI-04  POST /ausleihen/{ausleiheId}/pruefprotokoll
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| Roles allowed | `wart`
+| Request body | `{"neueMaengel": [{"beschreibung": string}], "kautionsabzugCent": integer ≥ 0, "zielzustand": "verfuegbar" \| "ausgemustert"}`
+| Success | 201 — `{pruefprotokollId, ausleiheId, kautionsabzugCent, neuerGegenstandZustand}`
+|===
+
+*Validation and processing sequence* [`anwendungskern/pruefung_service.py:100-230`]:
+
+. Find loan by ID → 404 if not found.
+. Load item; verify `zustand = in_pruefung` → 409 NICHT_IN_PRUEFUNG.
+. Verify `kautionsabzugCent ≤ ausleihe.kaution_cent` → 422.
+. Load existing defects for item; filter `neueMaengel` to truly new (BR-RUP-05).
+. Compute `nutzungszaehler_new = nutzungszaehler + 1`.
+. Determine effective next state:
+  `ausgemustert` > `wartungsfaellig (if nutzungszaehler_new ≥ wartungsintervall)` > `verfuegbar`.
+. Create `Pruefprotokoll`, `MaengelEintrag` list, `Kautionsbewegung` list
+  (FREIGABE + optional ABZUG), `AuditLogEintrag`.
+. Call `PruefabschlussRepository.abschliessen()` — all writes in one `BEGIN IMMEDIATE` transaction.
+
+*Error responses*:
+
+[cols="1,2,3", options="header"]
+|===
+| HTTP | Code | Rule
+| 404 | AUSLEIHE_NICHT_GEFUNDEN | –
+| 409 | NICHT_IN_PRUEFUNG | Item not awaiting inspection
+| 422 | ABZUG_UEBERSTEIGT_KAUTION | BR-KAU-02
+|===
+
+---
+
+=== SI-05  POST /vormerkungen  |  GET /vormerkungen/{id}
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| POST role | `mitglied`
+| POST body | `{"mitgliedId": string, "kategorieId": string}`
+| POST success | 201 — `{vormerkungId, mitgliedId, kategorieId, erstelltAm, status, reihenfolge}`
+| GET roles | `thekendienst`, `mitglied`, `wart`
+| GET success | 200 — same schema
+|===
+
+*POST processing* [`anwendungskern/vormerkung_service.py:59-115`]:
+
+. Verify category exists.
+. Check member lock (currently a stub — always passes, TD-04).
+. Check no existing open reservation for (member, category).
+. Compute queue position = `count(open) + 1`.
+. Insert reservation with `status = offen`.
+
+*Error responses*:
+
+[cols="1,2", options="header"]
+|===
+| HTTP | Code
+| 404 | KATEGORIE_NICHT_GEFUNDEN
+| 409 | MITGLIED_GESPERRT (stub)
+| 409 | DUPLIKAT_VORMERKUNG
+| 404 | VORMERKUNG_NICHT_GEFUNDEN (GET only)
+|===
+
+---
+
+=== SI-06  POST /ausleihen/{ausleiheId}/verlust
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| Roles allowed | `wart`
+| Request body | _(empty)_
+| Success | 201 — same schema as SI-01
+|===
+
+*Processing* [`anwendungskern/verlust_service.py:48-174`]:
+
+. Find loan → 404.
+. Verify `zustand = aktiv` → 409 AUSLEIHE_NICHT_AKTIV.
+. Verify item exists (consistency check) → 404.
+. Inside `BEGIN IMMEDIATE` transaction:
+  update loan to `abgeschlossen_verloren`;
+  update item to `ausgemustert`;
+  insert `Kautionsbewegung(VERLUST_EINZUG, betrag = kaution_cent)`;
+  insert two `AuditLogEintrag` records.
+
+NOTE: This service imports `sqlite3` directly, violating the port isolation principle (TD-06).
+
+*Error responses*:
+
+[cols="1,2", options="header"]
+|===
+| HTTP | Code
+| 404 | AUSLEIHE_NICHT_GEFUNDEN
+| 409 | AUSLEIHE_NICHT_AKTIV
+| 404 | GEGENSTAND_NICHT_GEFUNDEN (consistency guard)
+|===
+
+---
+
+=== SI-Wartung  POST /wartungen
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| Roles allowed | `wart`
+| Request body | `{"inventarnummer": string}`
+| Success | 200 — `{inventarnummer, zustand, nutzungszaehler}`
+|===
+
+*Processing* [`anwendungskern/wartung_service.py:62-133`]:
+
+. Find item → 404.
+. Verify `zustand = wartungsfaellig` → 409.
+. Load open reservations for category.
+. Set next state: _reserviert_ if reservation exists, _verfuegbar_ otherwise (BR-VOR-03).
+. Reset `nutzungszaehler = 0` (BR-WAR-03).
+. Update item; append `AuditLogEintrag`.
+
+*Error responses*:
+
+[cols="1,2", options="header"]
+|===
+| HTTP | Code
+| 404 | GEGENSTAND_NICHT_GEFUNDEN
+| 409 | NICHT_WARTUNGSFAELLIG
+|===
+
+---
+
+=== SI-07  POST /einweisungen
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| Roles allowed | `wart`
+| Request body | `{"mitgliedId": string, "kategorieId": string}`
+| Success | 201 — `{einweisungId, mitgliedId, kategorieId, erstelltAm}`
+|===
+
+*Processing* [`anwendungskern/einweisung_service.py:55-108`]:
+
+. Verify category exists → 404.
+. Verify no valid certification exists for (member, category) → 409.
+. Insert `Einweisung` with `widerrufen_am = NULL`.
+. Append `AuditLogEintrag`.
+
+*Error responses*:
+
+[cols="1,2", options="header"]
+|===
+| HTTP | Code
+| 404 | KATEGORIE_NICHT_GEFUNDEN
+| 409 | DUPLIKAT_EINWEISUNG
+|===
+
+---
+
+=== SI-08  DELETE /einweisungen/{einweisungId}
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| Roles allowed | `wart`
+| Success | 204 — no body
+|===
+
+*Processing* [`anwendungskern/einweisung_service.py:114-157`]:
+
+. Find certification → 404.
+. Verify not already revoked → 409.
+. Set `widerrufen_am = now`.
+. Append `AuditLogEintrag`.
+
+*Error responses*:
+
+[cols="1,2", options="header"]
+|===
+| HTTP | Code
+| 404 | EINWEISUNG_NICHT_GEFUNDEN
+| 409 | BEREITS_WIDERRUFEN
+|===
+
+---
+
+=== SI-09  Catalogue Endpoints
+
+[cols="2,1,2,2", options="header"]
+|===
+| Endpoint | Role | Body | Success
+| POST /kategorien | `wart` | `{kategorieId, name, leihdauerTage, wartungsintervall, einweisungspflichtig}` | 201 category
+| PUT /kategorien/{id} | `wart` | `{leihdauerTage, wartungsintervall, einweisungspflichtig}` | 200 category
+| POST /gegenstaende | `wart` | `{inventarnummer, kategorieId, wiederbeschaffungswertCent}` | 201 item
+| PUT /gegenstaende/{id} | `wart` | `{wiederbeschaffungswertCent}` | 200 item
+| GET /gegenstaende/{id} | any | – | 200 `{inventarnummer, kategorieId, zustand}`
+|===
+
+Evidence: [`adapters/rest/app.py:276-374`, `adapters/rest/schemas.py:8-29`]
+
+*Validation rules*:
+
+* BR-KAT-01: `inventarnummer` must not already exist.
+* BR-KAT-02: `leihdauerTage > 0`, `wartungsintervall > 0`.
+* BR-KAT-03: `wiederbeschaffungswertCent > 0`.
+* BR-KAT-05: Changing `leihdauerTage` only affects future loans (existing `rueckgabefrist` is a snapshot).
+* BR-KAT-06: Changing `wartungsintervall` takes effect at the next inspection.
+
+*Error responses*:
+
+[cols="1,2", options="header"]
+|===
+| HTTP | Code
+| 404 | KATEGORIE_NICHT_GEFUNDEN / GEGENSTAND_NICHT_GEFUNDEN
+| 409 | INVENTARNUMMER_VERGEBEN
+| 422 | WERT_UNGUELTIG
+|===
+
+NOTE: Catalogue mutations produce no audit entries (TD-05).
+
+---
+
+=== SI-Admin  GET /admin/audit-log/stats  |  POST /admin/audit-log/cleanup
+
+[cols="1,3", options="header"]
+|===
+| Field | Value
+| Roles allowed | `admin`
+| GET success | 200 — `{total_entries, oldest_entry, newest_entry, daily_rate, estimated_size_mb}`
+| POST success | 200 — `{deleted_count, archived_count, oldest_kept_timestamp, deleted_oldest_timestamp}`
+|===
+
+NOTE: The cleanup endpoint contains a runtime bug (TD-02) and cannot actually delete
+audit entries due to the immutability trigger (TD-07).
+Evidence: [`anwendungskern/audit_retention_service.py:52-61`, `adapters/rest/app.py:560-585`]
+
+---
+
+== Part 3  Supplementary Specifications
+
+=== 3.1  Entity Model
+
+==== Entities and Aggregates
+
+[cols="1,1,3", options="header"]
+|===
+| Entity | Type | Key fields
+| `Kategorie` | Reference entity | `kategorie_id` (PK), `name`, `leihdauer_tage`, `wartungsintervall`, `einweisungspflichtig`
+| `Gegenstand` | Aggregate root | `inventarnummer` (PK), `kategorie_id` (FK), `wiederbeschaffungswert_cent`, `nutzungszaehler`, `zustand`
+| `Ausleihe` | Aggregate root | `ausleihe_id` (UUID PK), `gegenstand_id` (FK), `mitglied_id` (plain text), `ausgabedatum`, `rueckgabefrist`, `kaution_cent` (snapshot), `verlaengert`, `zustand`, `rueckgabe_auffaelligkeiten`, `mitglied_gesperrt`
+| `Einweisung` | Aggregate | `einweisung_id` (UUID PK), `mitglied_id` (text), `kategorie_id` (FK), `erstellt_am`, `widerrufen_am`
+| `Vormerkung` | Aggregate | `vormerkung_id` (UUID PK), `kategorie_id` (FK), `mitglied_id` (text), `status`, `reihenfolge`, `erstellt_am`
+| `Pruefprotokoll` | Value record | `pruefprotokoll_id` (UUID PK), `ausleihe_id` (FK), `kautionsabzug_cent`, `zielzustand`, `erstellt_am`
+| `MaengelEintrag` | Value record | `maengel_id` (UUID PK), `gegenstand_id` (FK), `beschreibung` (unique per item), `festgestellt_in_pruefprotokoll_id` (FK)
+| `Kautionsbewegung` | Value record | `bewegung_id` (UUID PK), `ausleihe_id` (FK), `art`, `betrag_cent`, `zeitstempel`, `ausloeser`
+| `AuditLogEintrag` | Append-only | `audit_id` (AUTOINCREMENT), `zeitstempel`, `aggregat`, `aggregat_id`, `ereignisart`, `rolle`, `werte_vorher`, `werte_nachher`
+|===
+
+Evidence: [`adapters/persistence/schema.sql:12-166`]
+
+NOTE: `mitglied_id` is a plain TEXT field in all tables — there is no `Mitglied` entity
+in this system. Member management is outside the scope of this bounded context.
+
+==== Key Relationships
+
+* `Gegenstand` → `Kategorie` (many-to-one, FK enforced)
+* `Ausleihe` → `Gegenstand` (many-to-one, FK enforced)
+* `Pruefprotokoll` → `Ausleihe` (one-to-one in practice, FK enforced)
+* `MaengelEintrag` → `Gegenstand` + `Pruefprotokoll` (FK enforced)
+* `Kautionsbewegung` → `Ausleihe` (many-to-one, FK enforced)
+* `Einweisung` → `Kategorie` (many-to-one, FK enforced)
+* `Vormerkung` → `Kategorie` (many-to-one, FK enforced)
+
+=== 3.2  State Machines
+
+==== Gegenstand (Item) States
+
+[source]
+----
+                  ┌──────────────────────────────────────────────────┐
+                  │  UC-09: gegenstand_anlegen                       │
+                  ▼                                                   │
+           [VERFUEGBAR] ──── UC-01 (issue) ──────► [AUSGELIEHEN]     │
+                │  ▲                                    │             │
+   UC-05 (maint)│  │ UC-04 (verfuegbar)        UC-03 (return)        │
+                ▼  │                                    ▼             │
+         [RESERVIERT]   UC-04 (verfuegbar)        [IN_PRUEFUNG]       │
+                 ▲     ◄─────────────────────────────  │             │
+                 │                            UC-04 (wartungsfaellig) │
+                 │                                      ▼             │
+                 └──── UC-05 (wartung) ─── [WARTUNGSFAELLIG]          │
+                                                        │             │
+                                           UC-04 (ausgemustert)       │
+                                           UC-06 (loss)               │
+                                                        ▼             │
+                                                 [AUSGEMUSTERT] ──────┘
+----
+
+Evidence: [`domain/gegenstand.py:10-19`, `anwendungskern/pruefung_service.py:83-95`,
+`anwendungskern/wartung_service.py:104-110`]
+
+==== Ausleihe (Loan) States
+
+[source]
+----
+             UC-01
+     ──────► [AKTIV] ────── UC-03 (return) ────► [ZURUECKGEGEBEN]
+                │                                        │
+                │                               UC-04 (inspect)
+                │                                        ▼
+                │                                 [ABGESCHLOSSEN]
+                │
+                └── UC-06 (loss) ─────────► [ABGESCHLOSSEN_VERLOREN]
+----
+
+Evidence: [`domain/ausleihe.py:14-18`]
+
+==== Vormerkung (Reservation) States
+
+[source]
+----
+             UC-11 (place)
+     ──────► [OFFEN] ───── UC-03 auto-cancel ──► [AUTOMATISCH_ABGESAGT]
+                │
+                └── manual cancel ──────────────► [MANUELL_ABGESAGT]
+----
+
+Evidence: [`domain/vormerkung.py:12-16`, `anwendungskern/vormerkung_service.py:138-146`]
+
+=== 3.3  Validation Rules
+
+[cols="1,2,3", options="header"]
+|===
+| Rule ID | Rule | Evidence
+| BR-KAT-01 | `inventarnummer` must be unique across all `Gegenstand` records. | `anwendungskern/katalog_service.py:144`
+| BR-KAT-02 | `leihdauer_tage > 0` AND `wartungsintervall > 0`. | `anwendungskern/katalog_service.py:64-67`
+| BR-KAT-03 | `wiederbeschaffungswert_cent > 0`. | `anwendungskern/katalog_service.py:72-74`
+| BR-KAT-04 | Deposit = `round(wert_cent × 0.20 / 100) × 100`, then clamped to [500, 10 000] cents. | `domain/kaution.py:7-18`
+| BR-KAT-05 | Changing `leihdauer_tage` only affects future loans; existing `Ausleihe.rueckgabefrist` is a materialized snapshot. | `anwendungskern/katalog_service.py:109-117`
+| BR-KAT-06 | Changing `wartungsintervall` takes effect at the next inspection (comparison against current Kategorie at inspection time). | `anwendungskern/katalog_service.py:109-117`
+| BR-AUS-01 | Item must be `verfuegbar` OR (`reserviert` AND first open reservation belongs to this member). | `anwendungskern/ausleihe_service.py:121-130`
+| BR-AUS-02 | A member may hold at most 3 simultaneous open loans (states `aktiv` or `zurueckgegeben`). | `anwendungskern/ausleihe_service.py:31, 135`
+| BR-AUS-03 | A member with at least one overdue active loan is locked and cannot issue new items. | `anwendungskern/ausleihe_service.py:133-134`
+| BR-AUS-04 | If `kategorie.einweisungspflichtig = true`, a valid (non-revoked) `Einweisung` must exist for (member, category). | `anwendungskern/ausleihe_service.py:137-138`
+| BR-AUS-05 | The issuing role is recorded in the audit log. | `anwendungskern/ausleihe_service.py:222-243`
+| BR-AUS-06 | A loan may be extended at most once. New deadline = `old_rueckgabefrist + leihdauer_tage`. | `anwendungskern/verlaengerung_service.py:138-160`
+| BR-AUS-07 | A loan whose `rueckgabefrist < today` cannot be extended. | `anwendungskern/verlaengerung_service.py:124-126`
+| BR-AUS-08 | A locked member cannot extend a loan. | `anwendungskern/verlaengerung_service.py:133-135`
+| BR-AUS-09 | The deposit amount is unchanged by an extension. | `anwendungskern/verlaengerung_service.py:169`
+| BR-SPE-02 | Overdue detection: `zustand = aktiv AND rueckgabefrist < heute`. | `domain/ausleihe.py:34-39`
+| BR-RUP-01 | Accepting a return transitions the item to `in_pruefung`. | `anwendungskern/ausleihe_service.py:285`
+| BR-RUP-04 | Completing an inspection closes the loan (`abgeschlossen`). | `anwendungskern/pruefung_service.py:193`
+| BR-RUP-05 | A defect is "new" only if its exact `beschreibung` does not already exist in `maengel_eintrag` for that item. | `anwendungskern/pruefung_service.py:132-145`
+| BR-KAU-02 | Deposit deduction must not exceed the held deposit; violation → 422. | `anwendungskern/pruefung_service.py:78-79`
+| BR-KAU-03 | Loss → full deposit retained (VERLUST_EINZUG). | `anwendungskern/verlust_service.py:125-129`
+| BR-EIN-01 | At most one valid (non-revoked) `Einweisung` per (member, category). DB-enforced via partial unique index. | `anwendungskern/einweisung_service.py:74-79`, `adapters/persistence/schema.sql:76-78`
+| BR-EIN-02 | An `Einweisung` is valid indefinitely until explicitly revoked. | `domain/einweisung.py:18-20`
+| BR-EIN-03 | Revocation is irreversible. | `anwendungskern/einweisung_service.py:128-134`
+| BR-VOR-01 | At most one open `Vormerkung` per (member, category). DB-enforced via partial unique index. | `adapters/persistence/schema.sql:159-162`
+| BR-VOR-02 | Reservations are served FIFO. `reihenfolge = count(open) + 1`. | `anwendungskern/vormerkung_service.py:51-53`
+| BR-VOR-03 | After maintenance completion, if an open reservation exists → item state `reserviert`; otherwise `verfuegbar`. | `anwendungskern/wartung_service.py:104-110`
+| BR-VER-01 | Only active loans can be reported as lost. | `anwendungskern/verlust_service.py:74-76`
+| BR-VER-03 | A lost item is retired (`ausgemustert`). | `anwendungskern/verlust_service.py:115-121`
+| BR-WAR-01 | `nutzungszaehler` is incremented by 1 at every inspection close. | `anwendungskern/pruefung_service.py:148`
+| BR-WAR-02 | If `nutzungszaehler_new ≥ kategorie.wartungsintervall`, effective next state is `wartungsfaellig` (unless technician selected `ausgemustert`). | `anwendungskern/pruefung_service.py:83-95`
+| BR-WAR-03 | Completing maintenance resets `nutzungszaehler = 0`. | `anwendungskern/wartung_service.py:117-119`
+|===
+
+=== 3.4  Acceptance Criteria (Gherkin — selected)
+
+The following scenarios are derived from the business rules encoded in the codebase.
+Formal feature files (`spec-acceptance-criteria.adoc`, `*.feature`) are referenced
+in the code but are not present in the repository (deferred — see OPEN_QUESTIONS.adoc).
+
+[source,gherkin]
+----
+Feature: Gegenstand ausgeben (UC-01)
+
+  Scenario: Issue available item to eligible member
+    Given item "inv-001" is in state "verfuegbar"
+    And member "M-42" has 0 open loans
+    And member "M-42" is not locked
+    And category "cat-1" requires no training
+    When "thekendienst" issues "inv-001" to "M-42"
+    Then a new loan is created in state "aktiv"
+    And item "inv-001" is in state "ausgeliehen"
+    And the loan's kautionCent equals round(wert * 0.2 / 100) * 100 clamped to [500, 10000]
+
+  Scenario: Reject issue when member has 3 open loans
+    Given member "M-42" already has 3 loans in states "aktiv" or "zurueckgegeben"
+    When "thekendienst" attempts to issue any available item to "M-42"
+    Then the response is 409 AUSLEIHLIMIT_ERREICHT
+
+  Scenario: Reject issue when member has an overdue loan
+    Given member "M-42" has an active loan with rueckgabefrist in the past
+    When "thekendienst" attempts to issue any available item to "M-42"
+    Then the response is 409 MITGLIED_GESPERRT
+
+  Scenario: Reject concurrent double-issue
+    Given item "inv-001" is in state "verfuegbar"
+    When two simultaneous requests attempt to issue "inv-001"
+    Then exactly one request receives 201
+    And the other request receives 409 GEGENSTAND_NICHT_VERFUEGBAR
+
+Feature: Prüfung abschließen (UC-04)
+
+  Scenario: Close inspection with no damage
+    Given loan "L-1" is in state "zurueckgegeben"
+    And item "inv-001" is in state "in_pruefung"
+    And nutzungszaehler = 4, wartungsintervall = 10
+    When "wart" closes inspection with kautionsabzugCent=0 zielzustand="verfuegbar"
+    Then loan "L-1" is in state "abgeschlossen"
+    And item "inv-001" is in state "verfuegbar"
+    And nutzungszaehler = 5
+    And a Kautionsbewegung FREIGABE = kaution_cent is created
+
+  Scenario: Maintenance threshold reached
+    Given nutzungszaehler = 9, wartungsintervall = 10
+    When "wart" closes inspection with zielzustand="verfuegbar"
+    Then item state is "wartungsfaellig" (BR-WAR-02 overrides)
+
+  Scenario: Reject deduction exceeding deposit
+    Given loan "L-1" has kaution_cent = 1000
+    When "wart" submits kautionsabzugCent = 1500
+    Then the response is 422 ABZUG_UEBERSTEIGT_KAUTION
+
+  Scenario: Known defect not duplicated (BR-RUP-05)
+    Given item "inv-001" has a known defect "Kratzer Vorderseite"
+    When "wart" reports defect "Kratzer Vorderseite" in the inspection
+    Then no new MaengelEintrag is created for "Kratzer Vorderseite"
+
+Feature: Kaution (deposit rules)
+
+  Scenario: Deposit calculation is bounded
+    Given an item with wiederbeschaffungswertCent = 100 (→ 20% = 0 → clamped to 500)
+    Then kaution = 500 cents (€5 minimum)
+
+  Scenario: Deposit calculation upper bound
+    Given an item with wiederbeschaffungswertCent = 1_000_000
+    Then kaution = 10000 cents (€100 maximum)
+----

@@ -1,0 +1,113 @@
+= leihgut-ADR-009: Audit Log Immutability via BEFORE UPDATE/DELETE Triggers
+:status: Accepted
+:date: 2026-08-24
+:toc: left
+:icons: font
+
+== Status
+
+Accepted +
+_(Known gap: the retention cleanup mechanism cannot actually delete entries — see
+Consequences.)_
+
+== Context
+
+The audit log (`audit_log` table) is the primary compliance and traceability
+mechanism for Leihgut. Every state-changing operation appends an `AuditLogEintrag`
+capturing who changed what, in which role, and what the before/after state was.
+
+For the audit log to be trustworthy, its records must not be modifiable or deletable
+after they have been written — either by application code, by a DB administrator, or
+by a bug in the application.
+
+The application layer enforces append-only semantics in `SqliteAuditLogRepository`:
+the `insert()` method is the only operation, and no `update()` or `delete()` method
+exists. However, this is not sufficient: a future developer could add a deletion path,
+or a DB administrator could issue `DELETE FROM audit_log` directly in a SQL shell.
+
+Additionally, the known risk R-002 (filesystem-level access bypassing SQLite)
+explicitly acknowledges that the trigger-based protection does not extend to
+direct file manipulation.
+
+== Decision
+
+Two `BEFORE` triggers are defined in `schema.sql` that call `RAISE(ABORT, …)` on
+any `UPDATE` or `DELETE` attempt against `audit_log`:
+
+[source,sql]
+----
+CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_update
+BEFORE UPDATE ON audit_log
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log ist unveraenderlich (ADR-009): UPDATE nicht erlaubt');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_audit_log_no_delete
+BEFORE DELETE ON audit_log
+BEGIN
+    SELECT RAISE(ABORT, 'audit_log ist unveraenderlich (ADR-009): DELETE nicht erlaubt');
+END;
+----
+
+Evidence: [`schema.sql:96-106`]
+
+The audit repository's `insert()` method does not call `COMMIT`; it runs within
+whatever transaction the caller has open, ensuring atomicity with the business change
+(ADR-006).
+
+== Alternatives Considered
+
+=== Pugh Matrix
+
+Criteria: Correctness (tamper evidence), Reliability (immutability guarantee),
+Simplicity, Operational Flexibility (ability to purge old entries).
+
+[cols="4,1,1,1,1", options="header"]
+|===
+| Alternative | Correctness | Reliability | Simplicity | Op. Flexibility
+| *A — Application-layer enforcement only (no triggers)* | -1 | -1 | +1 | +1
+| *B — Triggers (this decision)* | +1 | +1 | 0 | -1
+| *C — Separate append-only log store (e.g., WORM file, S3)* | +1 | +1 | -1 | 0
+|===
+
+A relies entirely on the application code never introducing a deletion path — a weak
+guarantee over time. C would require an external service, violating the single-process
+constraint (Section 2, arc42). B is the strongest in-process guarantee available in
+SQLite and requires no external dependency.
+
+== Consequences
+
+*Positive:*
+
+* No SQL `UPDATE` or `DELETE` on `audit_log` can succeed, regardless of who issues it
+  or through what tool.
+* The trigger error message contains the ADR reference number, making the constraint
+  self-documenting in the DB.
+* Immutability is enforced at schema creation time; no ongoing application code is
+  required to maintain it.
+
+*Negative / Known Gap — Retention:*
+
+The decision creates a fundamental tension with retention management:
+`cleanup_audit_log()` in `anwendungskern/audit_retention_service.py` is designed to
+discard old entries (hot_days = 90 days). However, because the `BEFORE DELETE` trigger
+aborts any `DELETE` on `audit_log`, the cleanup function cannot actually remove rows.
+
+The current workaround inserts a `retention_cleanup` record to document the intended
+deletion — but the old entries remain. The audit log grows without bound.
+[`anwendungskern/audit_retention_service.py:52-119`]
+
+This is tracked as TD-07 and R-005. A resolution requires one of:
+
+. Moving old entries to a separate `audit_log_archive` table (not subject to the
+  trigger) before deletion from `audit_log`.
+. Implementing a two-table approach where only `audit_log_archive` is append-only
+  and `audit_log` is a rolling hot partition.
+. Accepting unbounded growth and removing the retention endpoint.
+
+*Negative — Filesystem bypass:*
+
+The triggers protect only against SQL-level access. Direct manipulation of the
+`.sqlite` file at the OS level bypasses all protections. This is acknowledged as
+R-002 and has no technical mitigation within this architecture.
+[`schema.sql:93-95`]
