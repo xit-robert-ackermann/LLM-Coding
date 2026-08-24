@@ -1,0 +1,307 @@
+==== Persona Use Case
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Use-Case-ID
+|UC-06
+
+|Name
+|Einweisung anlegen
+
+|Primary Actor
+|Rolf (Wart)
+
+|Stakeholders
+a|
+* *Mitglied* — möchte einweisungspflichtige Geräte ausleihen können.
+* *Verein* — braucht eine nachvollziehbare Dokumentation für die Haftungssicherung.
+
+|Trigger
+|Rolf hat eine Einweisung physisch durchgeführt und will sie im System dokumentieren.
+
+|Vorbedingungen
+a|
+* Das Mitglied mit der angegebenen Mitglieds-ID existiert im System.
+* Die Kategorie mit der angegebenen Kategorie-ID existiert im System.
+
+|Main Success Scenario
+a|
+. Rolf ruft `leihgut einweise <mitglied-id> <kategorie-id>` auf.
+. Das System prüft, ob das Mitglied existiert — Ergebnis: ja.
+. Das System prüft, ob die Kategorie existiert — Ergebnis: ja.
+. Das System prüft, ob `Kategorie.einweisungspflichtig` gesetzt ist — Ergebnis: true.
+. Das System prüft, ob eine Einweisung für dieses Mitglied und diese Kategorie bereits vorhanden ist — Ergebnis: nein.
+. Das System legt die Einweisung an: `(mitgliedId, kategorieId, dokumentiertAm = heute)`.
+. Das System gibt eine Bestätigung auf stdout aus: Mitglieds-ID, Name, Kategorie-ID, Bezeichnung, Datum.
+
+|Extensions
+a|
+*2a. Mitglied nicht gefunden:* +
+Das System gibt „Mitglied nicht gefunden" auf stderr aus und bricht mit Exit-Code ≠ 0 ab.
+
+*3a. Kategorie nicht gefunden:* +
+Das System gibt „Kategorie nicht gefunden" auf stderr aus und bricht mit Exit-Code ≠ 0 ab.
+
+*4a. Kategorie nicht einweisungspflichtig:* +
+Das System gibt einen Hinweis auf stderr aus: „Hinweis: Kategorie ist nicht einweisungspflichtig. Einweisung wird trotzdem erfasst." +
+Der Use Case läuft ab Schritt 5 weiter. Die Einweisung wird angelegt.
+
+*5a. Einweisung bereits vorhanden:* +
+Das System verhält sich idempotent: Es legt keine neue Einweisung an und gibt stattdessen auf stdout aus: „Einweisung bereits vorhanden (erfasst: <datum>). Keine Änderung." +
+Exit-Code: 0.
+
+|Nachbedingungen
+|Die Einweisung `(mitgliedId, kategorieId)` existiert im System. +
+Das Mitglied darf nun Gegenstände der betreffenden Kategorie ausleihen, sofern alle weiteren Ausgabebedingungen erfüllt sind (BR-010).
+
+|Geschäftsregeln
+|BR-002, BR-010, BR-037, BR-038, BR-039, BR-042
+|===
+
+==== Aktivitätsdiagramm
+
+[plantuml]
+----
+@startuml
+skinparam defaultFontSize 13
+
+start
+
+:Rolf ruft\nleihgut einweise <mitglied-id> <kategorie-id>\nauf (BR-039, BR-042);
+
+if (Mitglied <mitglied-id> existiert?) then (nein)
+  #pink:Fehler auf stderr:\n"Mitglied nicht gefunden"\nExit-Code ≠ 0;
+  stop
+endif
+
+if (Kategorie <kategorie-id> existiert?) then (nein)
+  #pink:Fehler auf stderr:\n"Kategorie nicht gefunden"\nExit-Code ≠ 0;
+  stop
+endif
+
+if (Kategorie.einweisungspflichtig?) then (nein)
+  #lightyellow:Hinweis auf stderr:\n"Kategorie ist nicht einweisungspflichtig.\nEinweisung wird trotzdem erfasst." (BR-002);
+endif
+
+if (Einweisung für Mitglied + Kategorie\nbereits vorhanden?) then (ja)
+  #lightblue:Ausgabe auf stdout:\n"Einweisung bereits vorhanden\n(erfasst: <datum>). Keine Änderung."\nExit-Code 0;
+  stop
+endif
+
+:Einweisung anlegen:\nmitgliedId, kategorieId,\ndokumentiertAm = heute (BR-037);
+
+#lightgreen:Ausgabe auf stdout:\nEinweisung erfasst,\nMitglied, Kategorie, Datum\nExit-Code 0;
+
+stop
+@enduml
+----
+
+==== System Use Case: CLI `leihgut einweise`
+
+===== Kommando
+
+[source]
+----
+leihgut einweise <mitglied-id> <kategorie-id> [--notiz <text>]
+----
+
+[cols="1,2,3"]
+|===
+|Parameter |Pflicht |Beschreibung
+
+|`<mitglied-id>`
+|ja
+|ID des Mitglieds, das eingewiesen wurde.
+
+|`<kategorie-id>`
+|ja
+|ID der Kategorie, für die die Einweisung gilt.
+
+|`--notiz <text>`
+|nein
+|Freitextnotiz, z. B. Datum der Einweisung oder Name des Geräts. Wird gespeichert, aber nicht ausgewertet.
+|===
+
+===== Validierungen
+
+[cols="1,1,3,3"]
+|===
+|Schritt |Bedingung |Verhalten |BR
+
+|V-1
+|Mitglied mit `<mitglied-id>` nicht gefunden
+|Ausgabe auf stderr: `Mitglied nicht gefunden.` +
+Exit-Code: 1
+|BR-037
+
+|V-2
+|Kategorie mit `<kategorie-id>` nicht gefunden
+|Ausgabe auf stderr: `Kategorie nicht gefunden.` +
+Exit-Code: 1
+|BR-037
+
+|V-3
+|`Kategorie.einweisungspflichtig = false`
+|Warnung auf stderr: +
+`Hinweis: Kategorie ist nicht einweisungspflichtig. Einweisung wird trotzdem erfasst.` +
+Verarbeitung läuft weiter.
+|BR-002, BR-037
+
+|V-4
+|Einweisung für `mitgliedId + kategorieId` bereits vorhanden
+|Ausgabe auf stdout (idempotent): +
+`Einweisung bereits vorhanden (erfasst: <datum>). Keine Änderung.` +
+Exit-Code: 0
+|BR-037
+|===
+
+===== Verarbeitung
+
+. Wenn noch keine Einweisung für `(mitgliedId, kategorieId)` existiert: +
+  Einweisung anlegen mit `mitgliedId`, `kategorieId`, `dokumentiertAm = heute`.
+. Andernfalls: keine Änderung (idempotent).
+
+===== Ausgabe
+
+*Neue Einweisung angelegt* (stdout):
+
+[source]
+----
+Einweisung erfasst.
+Mitglied:  M-007 (Sabine Müller)
+Kategorie: KAT-003 (Kettensägen)
+Datum:     2026-08-24
+----
+
+*Einweisung bereits vorhanden* (stdout):
+
+[source]
+----
+Einweisung bereits vorhanden (erfasst: 2025-11-10). Keine Änderung.
+----
+
+*Fehlerfall* (stderr, Exit-Code 1):
+
+[source]
+----
+Fehler: Mitglied nicht gefunden.
+----
+
+[source]
+----
+Fehler: Kategorie nicht gefunden.
+----
+
+==== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# UC-06 — BR-037, BR-042
+Scenario: Neue Einweisung für einweisungspflichtige Kategorie anlegen
+  Given Mitglied M-007 (Sabine Müller) existiert im System
+  And Kategorie KAT-003 (Kettensägen) existiert und ist einweisungspflichtig  # BR-002
+  And keine Einweisung für M-007 und KAT-003 ist vorhanden
+  When Rolf führt aus: leihgut einweise M-007 KAT-003
+  Then Exit-Code ist 0
+  And stdout enthält "Einweisung erfasst."
+  And stdout enthält "M-007"
+  And stdout enthält "KAT-003"
+  And das heutige Datum erscheint in stdout
+  And die Einweisung M-007/KAT-003 ist im System gespeichert          # BR-037
+----
+
+[source,gherkin]
+----
+# UC-06 — BR-037
+Scenario: Einweisung bereits vorhanden — idempotentes Verhalten
+  Given Mitglied M-007 existiert im System
+  And Kategorie KAT-003 existiert und ist einweisungspflichtig
+  And Einweisung M-007/KAT-003 existiert bereits, dokumentiertAm 2025-11-10
+  When Rolf führt aus: leihgut einweise M-007 KAT-003
+  Then Exit-Code ist 0
+  And stdout enthält "Einweisung bereits vorhanden (erfasst: 2025-11-10). Keine Änderung."
+  And keine neue Einweisung wurde angelegt
+----
+
+[source,gherkin]
+----
+# UC-06 — BR-002, BR-037
+Scenario: Kategorie nicht einweisungspflichtig — Warnung, Einweisung wird trotzdem angelegt
+  Given Mitglied M-007 existiert im System
+  And Kategorie KAT-001 (Hammer) existiert und ist NICHT einweisungspflichtig   # BR-002
+  And keine Einweisung für M-007 und KAT-001 ist vorhanden
+  When Rolf führt aus: leihgut einweise M-007 KAT-001
+  Then Exit-Code ist 0
+  And stderr enthält "Hinweis: Kategorie ist nicht einweisungspflichtig. Einweisung wird trotzdem erfasst."
+  And stdout enthält "Einweisung erfasst."
+  And die Einweisung M-007/KAT-001 ist im System gespeichert          # BR-037
+----
+
+[source,gherkin]
+----
+# UC-06 — BR-037
+Scenario: Mitglied nicht gefunden
+  Given kein Mitglied mit ID M-999 existiert im System
+  And Kategorie KAT-003 existiert
+  When Rolf führt aus: leihgut einweise M-999 KAT-003
+  Then Exit-Code ist nicht 0
+  And stderr enthält "Mitglied nicht gefunden"
+  And keine Einweisung wurde angelegt
+----
+
+[source,gherkin]
+----
+# UC-06 — BR-037
+Scenario: Kategorie nicht gefunden
+  Given Mitglied M-007 existiert im System
+  And keine Kategorie mit ID KAT-999 existiert im System
+  When Rolf führt aus: leihgut einweise M-007 KAT-999
+  Then Exit-Code ist nicht 0
+  And stderr enthält "Kategorie nicht gefunden"
+  And keine Einweisung wurde angelegt
+----
+
+[source,gherkin]
+----
+# UC-06 → UC-01 — BR-010, BR-037
+Scenario: Nach Einweisung kann Mitglied einweisungspflichtiges Gerät ausleihen
+  Given Mitglied M-007 existiert im System
+  And Kategorie KAT-003 ist einweisungspflichtig                          # BR-002
+  And Gegenstand G-042 (Stihl MS 250) gehört zu KAT-003 und ist verfügbar
+  And keine Einweisung für M-007/KAT-003 ist vorhanden
+  When Thekendienst versucht G-042 an M-007 auszuleihen
+  Then Ausleihe wird abgelehnt                                            # BR-010
+  When Rolf führt aus: leihgut einweise M-007 KAT-003
+  Then Einweisung M-007/KAT-003 ist im System gespeichert                # BR-037
+  When Thekendienst versucht G-042 an M-007 auszuleihen
+  Then Ausleihe wird erfolgreich erfasst
+----
+
+==== Anforderungen (EARS-Syntax)
+
+[cols="1,1,5"]
+|===
+|ID |EARS-Typ |Anforderung
+
+|EARS-06-01
+|When
+|*When* der Wart den Befehl `leihgut einweise <mitglied-id> <kategorie-id>` ausführt und Mitglied und Kategorie existieren und für dieses Paar noch keine Einweisung vorhanden ist, *shall* das System eine Einweisung mit Mitglieds-ID, Kategorie-ID und aktuellem Datum anlegen und eine Bestätigung auf stdout ausgeben. _(BR-037)_
+
+|EARS-06-02
+|When
+|*When* der Wart den Befehl `leihgut einweise` mit einer Mitglieds-ID aufruft, die im System nicht existiert, *shall* das System die Verarbeitung mit einer Fehlermeldung auf stderr und Exit-Code ≠ 0 abbrechen, ohne eine Einweisung anzulegen. _(BR-037)_
+
+|EARS-06-03
+|When
+|*When* der Wart den Befehl `leihgut einweise` für eine Kategorie aufruft, bei der `einweisungspflichtig = false` ist, *shall* das System einen Hinweis auf stderr ausgeben und die Einweisung dennoch anlegen. _(BR-002, BR-037)_
+
+|EARS-06-04
+|When
+|*When* der Wart den Befehl `leihgut einweise` für eine Mitglied-Kategorie-Kombination aufruft, für die bereits eine Einweisung gespeichert ist, *shall* das System idempotent reagieren: keine neue Einweisung anlegen, Exit-Code 0 zurückgeben und auf stdout melden, dass die Einweisung bereits vorhanden ist. _(BR-037)_
+
+|EARS-06-05
+|While
+|*While* für ein Mitglied keine Einweisung für eine einweisungspflichtige Kategorie gespeichert ist, *shall* das System jede Ausgabe eines Gegenstands dieser Kategorie an dieses Mitglied ablehnen. _(BR-010, BR-037)_
+|===

@@ -109,6 +109,13 @@ Er sieht die Geräte erst Tage nach der Rückgabe.
 Die Regeln sind fachlich formuliert.
 Die Vergabe von BR-IDs, die Zerlegung in atomare Regeln und die Zuordnung zu Use Cases gehören in die Spezifikation.
 
+=== Mitglieder
+
+* Das System führt einen minimalen Mitgliederstamm: Mitglieds-ID und Name.
+* Mitglieder werden über die REST-API angelegt.
+* Es gibt keine Deaktivierung.
+  Ausschlüsse aus dem Verein liegen außerhalb dieses Systems.
+
 === Katalog
 
 * Jeder Gegenstand hat eine eindeutige Inventarnummer und gehört zu genau einer Kategorie.
@@ -144,6 +151,8 @@ Wer dem Mitglied gegenübersteht, soll nicht über dessen Geld entscheiden.
 Begründung: Das Prüfprotokoll ist die einzige belastbare Quelle.
 Alles andere wäre Aussage gegen Aussage.
 * Nach der Prüfung geht der Gegenstand in genau einen dieser Zustände: verfügbar, wartungsfällig oder ausgemustert.
+* „Verloren" ist ein mögliches Prüfergebnis des Warts.
+  Es führt zur vollständigen Einbehaltung der Kaution und versetzt den Gegenstand in den Zustand „ausgemustert".
 
 === Kaution
 
@@ -167,6 +176,7 @@ Begründung: Nutzung lässt sich zählen, Betriebsstunden kann an der Theke niem
 * Eine Vormerkung gilt für eine Kategorie, nicht für einen einzelnen Gegenstand.
 * Vormerkungen einer Kategorie bilden eine Warteschlange nach Eingangszeit.
 * Wird ein Gegenstand nach der Prüfung verfügbar und liegt eine Vormerkung vor, wird er für das erste Mitglied der Warteschlange reserviert.
+* Werden mehrere Gegenstände einer Kategorie gleichzeitig nach der Prüfung verfügbar, löst jeder für sich eine Reservierung für das jeweils nächste Mitglied der Warteschlange aus.
 * Eine Reservierung verfällt drei Kalendertage nach ihrer Entstehung.
   Der Gegenstand geht dann an das nächste Mitglied der Warteschlange oder wird verfügbar.
 * Wird ein Gegenstand nach der Prüfung wartungsfällig, bleibt die Warteschlange unverändert bestehen.
@@ -175,6 +185,12 @@ Begründung: Nutzung lässt sich zählen, Betriebsstunden kann an der Theke niem
   Eine für ein gesperrtes Mitglied entstehende Reservierung wird übersprungen; das Mitglied behält seinen Platz in der Warteschlange.
 +
 Begründung: Die Sperre soll zur Rückgabe bewegen, nicht den Platz in der Schlange kosten.
+
+=== Einweisung
+
+* Eine Einweisung wird vom Wart über die CLI angelegt.
+* Sie gilt für eine Person und eine Kategorie, nicht für einen einzelnen Gegenstand.
+* Der Thekendienst prüft das Vorhandensein einer Einweisung, legt sie aber nicht an.
 
 === Sperre
 
@@ -229,6 +245,12 @@ Kein Mailversand, keine Zahlungsanbindung, keine Cloud.
 Authentifizierung::
 Rollen werden über einen Header oder ein CLI-Flag mitgegeben und nicht geprüft.
 Ein echtes Login ist ausdrücklich nicht Teil dieses Systems.
++
+Drei Rollen sind definiert:
++
+* `mitglied` — darf Verfügbarkeit abfragen und vormerken.
+* `thekendienst` — darf zusätzlich ausleihen, verlängern und Rückgaben entgegennehmen.
+* `wart` — CLI-Rolle; darf prüfen, warten, ausmustert und Einweisungen anlegen.
 
 Zeit::
 Das System liest das aktuelle Datum über eine austauschbare Quelle, damit Fristen testbar bleiben.
@@ -243,6 +265,8 @@ Fachbegriffe im Code folgen dem Glossar dieses Dokuments.
 |In Scope |Out of Scope
 
 a|
+* Mitglieder anlegen (minimaler Stamm: ID und Name)
+* Einweisungen anlegen (Wart, CLI)
 * Katalog mit Gegenständen und Kategorien
 * Ausleihe mit Prüfung aller Ausgabebedingungen
 * Verlängerung

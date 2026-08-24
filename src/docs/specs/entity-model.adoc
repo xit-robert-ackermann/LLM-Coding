@@ -1,0 +1,516 @@
+== Entity-Modell
+
+=== Entitäten
+
+==== Kategorie
+
+Gruppiert gleichartige Gegenstände und legt die fachlichen Parameter für alle Exemplare fest (BR-002).
+
+[cols="2,2,4"]
+|===
+|Attribut |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Systemgenerierter Bezeichner.
+
+|`name`
+|String, NOT NULL
+|Fachlicher Name der Kategorie (z. B. „Bohrhammer", „Lastenrad").
+
+|`leihdauerTage`
+|int, > 0
+|Anzahl Kalendertage, die eine Ausleihe dauern darf. Legt gleichzeitig die Verlängerungsdauer fest (BR-012).
+
+|`wartungsintervallAusleihen`
+|int, > 0
+|Zahl abgeschlossener Ausleihen, nach der ein Gegenstand in den Zustand WARTUNGSFAELLIG wechselt (BR-024).
+
+|`einweisungspflichtig`
+|boolean, NOT NULL
+|`true`: Ausleihe nur mit dokumentierter Einweisung für diese Kategorie (BR-010).
+|===
+
+==== Gegenstand
+
+Repräsentiert ein einzelnes physisches Exemplar im Bestand der Bibliothek der Dinge (BR-001).
+
+[cols="2,2,4"]
+|===
+|Attribut |Typ / Constraint |Beschreibung
+
+|`inventarnummer`
+|String, PK, UNIQUE
+|Eindeutiger Bezeichner des Exemplars. Wird beim Anlegen vergeben und ändert sich nie.
+
+|`kategorieId`
+|String, FK → Kategorie, NOT NULL
+|Kategoriezugehörigkeit. Unveränderlich nach dem Anlegen (BR-001).
+
+|`wiederbeschaffungswertEuro`
+|int, > 0
+|Preis für ein gleichwertiges Ersatzgerät in ganzen Euro (BR-003).
+
+|`kautionEuro`
+|int, derived, 5 ≤ x ≤ 100
+|20 % des Wiederbeschaffungswerts, kaufmännisch gerundet auf ganze Euro, Minimum 5, Maximum 100 (BR-004). Wird bei jeder Ausleihe neu berechnet; kein eigenes Persistenzfeld.
+
+|`nutzungszaehler`
+|int, ≥ 0
+|Zahl der abgeschlossenen Ausleihen seit der letzten Wartung. Startet bei 0, wird nach Wartungsabschluss auf 0 zurückgesetzt (BR-023, BR-025).
+
+|`status`
+|Enum, NOT NULL
+|Aktueller Zustand des Exemplars. Erlaubte Werte: `VERFUEGBAR`, `AUSGELIEHEN`, `IN_PRUEFUNG`, `WARTUNGSFAELLIG`, `AUSGEMUSTERT`, `RESERVIERT`.
+|===
+
+==== Mitglied
+
+Minimaler Datensatz einer Person, die ausleihen darf (BR-005, BR-006).
+
+[cols="2,2,4"]
+|===
+|Attribut |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Externe Mitglieds-ID, die der Verein vergibt. Das System legt keine eigene ID fest.
+
+|`name`
+|String, NOT NULL
+|Vollständiger Name des Mitglieds.
+|===
+
+_Sperre_ ist kein eigenes Attribut, sondern ein abgeleiteter Zustand: Ein Mitglied gilt als gesperrt, wenn mindestens eine seiner Ausleihen im Status OFFEN und überfällig ist (BR-034, BR-035, BR-036).
+
+==== Ausleihe
+
+Bildet den vollständigen Vorgang von der Ausgabe bis zum Abschluss der Prüfung ab (BR-011, BR-016).
+
+[cols="2,2,4"]
+|===
+|Attribut |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Systemgenerierter Bezeichner.
+
+|`gegenstandId`
+|String, FK → Gegenstand, NOT NULL
+|Das ausgeliehene Exemplar.
+
+|`mitgliedId`
+|String, FK → Mitglied, NOT NULL
+|Das ausleihende Mitglied.
+
+|`ausgabeDatum`
+|date, NOT NULL
+|Datum der Ausgabe an der Theke.
+
+|`rueckgabeFrist`
+|date, NOT NULL
+|Fälligkeitsdatum: `ausgabeDatum` + `leihdauerTage` der Kategorie (BR-011). Bei Verlängerung: bisherige Frist + `leihdauerTage` (BR-012).
+
+|`verlaengert`
+|boolean, NOT NULL, default false
+|`true`, wenn die Verlängerungsmöglichkeit bereits genutzt wurde (BR-012).
+
+|`auffaelligkeiten`
+|String, optional
+|Freitextfeld, das der Thekendienst bei der Rückgabe füllen kann (BR-015). Kein Einfluss auf Kautionslogik.
+
+|`status`
+|Enum, NOT NULL
+|`OFFEN`: Ausleihe läuft (auch während der Prüfung). `ABGESCHLOSSEN`: Prüfprotokoll liegt vor (BR-016).
+|===
+
+Eine Ausleihe gilt als *überfällig*, wenn `status = OFFEN` und `rueckgabeFrist < heute` und der Gegenstand nicht im Zustand IN_PRUEFUNG ist (BR-035).
+
+==== Pruefprotokoll
+
+Ergebnis der Prüfung durch den Wart. Schließt die Ausleihe ab und löst Kautionsbewegungen aus (BR-016, BR-019, BR-020).
+
+[cols="2,2,4"]
+|===
+|Attribut |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Systemgenerierter Bezeichner.
+
+|`ausleiheId`
+|String, FK → Ausleihe, UNIQUE, NOT NULL
+|Die abzuschließende Ausleihe. Pro Ausleihe gibt es höchstens ein Prüfprotokoll.
+
+|`ergebnis`
+|Enum, NOT NULL
+|`OK`: kein Schaden. `SCHADEN`: reparierbar, Abzug möglich. `VERLOREN`: vollständiger Kautionseinbehalt (BR-019). `IRREPARABEL`: Gegenstand wird ausgemustert, vollständiger Kautionseinbehalt.
+
+|`kautionsabzugEuro`
+|int, ≥ 0, NOT NULL
+|Einbehaltener Betrag. Darf die hinterlegte Kaution nicht überschreiten (BR-021). Bei `VERLOREN` und `IRREPARABEL` immer gleich der vollen Kaution.
+
+|`notiz`
+|String, optional
+|Erläuterung durch den Wart, insbesondere bei Schäden (BR-017).
+
+|`erstelltAm`
+|datetime, NOT NULL
+|Zeitstempel der Protokollerstellung.
+|===
+
+==== Kautionsbewegung
+
+Unveränderlicher Audit-Eintrag für jede Kautionsbewegung (BR-022).
+
+[cols="2,2,4"]
+|===
+|Attribut |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Systemgenerierter Bezeichner.
+
+|`ausleiheId`
+|String, FK → Ausleihe, NOT NULL
+|Die zugehörige Ausleihe.
+
+|`typ`
+|Enum, NOT NULL
+|`HINTERLEGUNG`: Kaution wird bei Ausgabe einbehalten. `ABZUG`: Teilbetrag wird einbehalten. `FREIGABE`: Betrag wird zurückgegeben.
+
+|`betragEuro`
+|int, NOT NULL
+|Bewegungsbetrag in ganzen Euro. Immer positiv; das Vorzeichen ergibt sich aus `typ`.
+
+|`zeitstempel`
+|datetime, NOT NULL
+|Zeitpunkt der Buchung.
+
+|`ausloeserId`
+|String, NOT NULL
+|Referenziert den auslösenden Vorgang: Ausleihe-ID (bei HINTERLEGUNG) oder Pruefprotokoll-ID (bei ABZUG und FREIGABE) (BR-022).
+|===
+
+==== Vormerkung
+
+Platz eines Mitglieds in der kategoriebezogenen Warteschlange (BR-027, BR-028).
+
+[cols="2,2,4"]
+|===
+|Attribut |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Systemgenerierter Bezeichner.
+
+|`mitgliedId`
+|String, FK → Mitglied, NOT NULL
+|Das vorgemerkte Mitglied.
+
+|`kategorieId`
+|String, FK → Kategorie, NOT NULL
+|Die beanspruchte Kategorie. Nicht ein einzelner Gegenstand (BR-027).
+
+|`eingangszeit`
+|datetime, NOT NULL
+|Sortierschlüssel der Warteschlange. Frühere Zeit = höhere Priorität (BR-028).
+
+|`status`
+|Enum, NOT NULL
+|`WARTEND`: in der Schlange. `RESERVIERT`: eine Reservierung ist entstanden. `STORNIERT`: manuell zurückgezogen oder durch System beendet.
+|===
+
+==== Reservierung
+
+Bindet einen bestimmten Gegenstand für drei Kalendertage an ein Mitglied (BR-029, BR-031).
+
+[cols="2,2,4"]
+|===
+|Attribut |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Systemgenerierter Bezeichner.
+
+|`gegenstandId`
+|String, FK → Gegenstand, NOT NULL
+|Das reservierte Exemplar.
+
+|`mitgliedId`
+|String, FK → Mitglied, NOT NULL
+|Das begünstigte Mitglied.
+
+|`entstandenAm`
+|date, NOT NULL
+|Datum der Reservierungsentstehung (nach Prüfung oder Wartungsabschluss).
+
+|`verfaelltAm`
+|date, derived, NOT NULL
+|`entstandenAm` + 3 Kalendertage. Nach diesem Datum wechselt der Status auf VERFALLEN (BR-031).
+
+|`status`
+|Enum, NOT NULL
+|`AKTIV`: Mitglied kann abholen. `ABGEHOLT`: Ausleihe wurde gestartet. `VERFALLEN`: Frist abgelaufen.
+|===
+
+==== Einweisung
+
+Dokumentiert, dass ein Mitglied für eine einweisungspflichtige Kategorie unterwiesen wurde (BR-037).
+
+[cols="2,2,4"]
+|===
+|Attribut |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Systemgenerierter Bezeichner.
+
+|`mitgliedId`
+|String, FK → Mitglied, NOT NULL
+|Das eingewiesene Mitglied.
+
+|`kategorieId`
+|String, FK → Kategorie, NOT NULL
+|Die Kategorie, für die die Einweisung gilt (BR-037). Gilt nicht gegenstandsbezogen.
+
+|`dokumentiertAm`
+|datetime, NOT NULL
+|Zeitpunkt, zu dem der Wart die Einweisung erfasst hat.
+|===
+
+Pro Mitglied und Kategorie genügt eine gültige Einweisung; Duplikate sind erlaubt und schaden nicht.
+
+---
+
+=== Entity-Relationship-Diagramm
+
+[plantuml]
+----
+@startuml
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+
+class Kategorie {
+  + id : String
+  + name : String
+  + leihdauerTage : int
+  + wartungsintervallAusleihen : int
+  + einweisungspflichtig : boolean
+}
+
+class Gegenstand {
+  + inventarnummer : String <<PK>>
+  + wiederbeschaffungswertEuro : int
+  + kautionEuro : int <<derived>>
+  + nutzungszaehler : int
+  + status : GegenstandStatus
+}
+
+enum GegenstandStatus {
+  VERFUEGBAR
+  AUSGELIEHEN
+  IN_PRUEFUNG
+  WARTUNGSFAELLIG
+  AUSGEMUSTERT
+  RESERVIERT
+}
+
+class Mitglied {
+  + id : String <<PK>>
+  + name : String
+}
+
+class Ausleihe {
+  + id : String <<PK>>
+  + ausgabeDatum : date
+  + rueckgabeFrist : date
+  + verlaengert : boolean
+  + auffaelligkeiten : String
+  + status : AusleiheStatus
+}
+
+enum AusleiheStatus {
+  OFFEN
+  ABGESCHLOSSEN
+}
+
+class Pruefprotokoll {
+  + id : String <<PK>>
+  + ergebnis : Pruefergebnis
+  + kautionsabzugEuro : int
+  + notiz : String
+  + erstelltAm : datetime
+}
+
+enum Pruefergebnis {
+  OK
+  SCHADEN
+  VERLOREN
+  IRREPARABEL
+}
+
+class Kautionsbewegung {
+  + id : String <<PK>>
+  + typ : Bewegungstyp
+  + betragEuro : int
+  + zeitstempel : datetime
+  + ausloeserId : String
+}
+
+enum Bewegungstyp {
+  HINTERLEGUNG
+  ABZUG
+  FREIGABE
+}
+
+class Vormerkung {
+  + id : String <<PK>>
+  + eingangszeit : datetime
+  + status : VormerkungStatus
+}
+
+enum VormerkungStatus {
+  WARTEND
+  RESERVIERT
+  STORNIERT
+}
+
+class Reservierung {
+  + id : String <<PK>>
+  + entstandenAm : date
+  + verfaelltAm : date <<derived>>
+  + status : ReservierungStatus
+}
+
+enum ReservierungStatus {
+  AKTIV
+  ABGEHOLT
+  VERFALLEN
+}
+
+class Einweisung {
+  + id : String <<PK>>
+  + dokumentiertAm : datetime
+}
+
+Gegenstand }o--|| Kategorie : "gehört zu"
+Ausleihe }o--|| Gegenstand : "betrifft"
+Ausleihe }o--|| Mitglied : "von"
+Pruefprotokoll ||--|| Ausleihe : "schließt ab"
+Kautionsbewegung }o--|| Ausleihe : "gehört zu"
+Vormerkung }o--|| Mitglied : "von"
+Vormerkung }o--|| Kategorie : "für"
+Reservierung }o--|| Gegenstand : "bindet"
+Reservierung }o--|| Mitglied : "für"
+Einweisung }o--|| Mitglied : "für"
+Einweisung }o--|| Kategorie : "gilt für"
+
+Gegenstand .. GegenstandStatus
+Ausleihe .. AusleiheStatus
+Pruefprotokoll .. Pruefergebnis
+Kautionsbewegung .. Bewegungstyp
+Vormerkung .. VormerkungStatus
+Reservierung .. ReservierungStatus
+
+@enduml
+----
+
+---
+
+=== Zustandsautomat: Gegenstand
+
+Der Zustand `AUSGEMUSTERT` ist ein Endzustand; kein Übergang führt heraus (BR-018, BR-019).
+
+[plantuml]
+----
+@startuml
+skinparam defaultFontSize 13
+
+[*] --> VERFUEGBAR : Gegenstand angelegt
+
+VERFUEGBAR --> AUSGELIEHEN : Ausgabe durch Thekendienst\n(BR-007, BR-011)
+VERFUEGBAR --> RESERVIERT : Prüfung OK / Wartung abgeschlossen,\nVormerkung vorhanden\n(BR-029)
+
+AUSGELIEHEN --> IN_PRUEFUNG : Rückgabe an Theke\n(BR-014)
+
+RESERVIERT --> AUSGELIEHEN : Mitglied holt ab\n(BR-007)
+RESERVIERT --> VERFUEGBAR : Reservierung verfallen,\nkeine weitere Vormerkung\n(BR-031)
+RESERVIERT --> RESERVIERT : Reservierung verfallen,\nnächstes Mitglied reserviert\n(BR-031)
+
+IN_PRUEFUNG --> VERFUEGBAR : Prüfung OK,\nNutzungszähler < Wartungsintervall,\nkeine Vormerkung\n(BR-018, BR-024)
+IN_PRUEFUNG --> RESERVIERT : Prüfung OK,\nNutzungszähler < Wartungsintervall,\nVormerkung vorhanden\n(BR-029)
+IN_PRUEFUNG --> WARTUNGSFAELLIG : Prüfung OK oder SCHADEN,\nNutzungszähler ≥ Wartungsintervall\n(BR-024)
+IN_PRUEFUNG --> AUSGEMUSTERT : Prüfung VERLOREN oder IRREPARABEL\n(BR-019)
+
+WARTUNGSFAELLIG --> VERFUEGBAR : Wart schließt Wartung ab,\nkeine Vormerkung\n(BR-025)
+WARTUNGSFAELLIG --> RESERVIERT : Wart schließt Wartung ab,\nVormerkung vorhanden\n(BR-025, BR-029)
+
+AUSGEMUSTERT --> [*]
+
+@enduml
+----
+
+---
+
+=== Zustandsautomat: Ausleihe
+
+[plantuml]
+----
+@startuml
+skinparam defaultFontSize 13
+
+[*] --> OFFEN : Ausgabe durch Thekendienst\n(BR-011)
+
+OFFEN --> ABGESCHLOSSEN : Prüfprotokoll durch Wart erstellt\n(BR-016)
+
+ABGESCHLOSSEN --> [*]
+
+@enduml
+----
+
+---
+
+=== Zustandsautomat: Mitglied (Sperre)
+
+Die Sperre ist kein persistiertes Attribut, sondern ein abgeleiteter Zustand, der aus den laufenden Ausleihen berechnet wird (BR-034, BR-035, BR-036).
+
+[plantuml]
+----
+@startuml
+skinparam defaultFontSize 13
+
+[*] --> Aktiv : Mitglied angelegt
+
+Aktiv --> Gesperrt : mind. eine Ausleihe OFFEN\nund rueckgabeFrist < heute\n(BR-034, BR-035)
+
+Gesperrt --> Aktiv : alle überfälligen Ausleihen\nhaben Prüfprotokoll (ABGESCHLOSSEN)\n(BR-036)
+
+note right of Gesperrt
+  Vormerken erlaubt (BR-033).
+  Ausleihen und Abholen gesperrt
+  (BR-009, BR-033).
+end note
+
+@enduml
+----
+
+---
+
+=== Zustandsautomat: Reservierung
+
+[plantuml]
+----
+@startuml
+skinparam defaultFontSize 13
+
+[*] --> AKTIV : entsteht nach Prüfung oder\nWartungsabschluss mit Vormerkung\n(BR-029, BR-031)
+
+AKTIV --> ABGEHOLT : Mitglied leiht Gegenstand aus\n(BR-007)
+AKTIV --> VERFALLEN : 3 Kalendertage abgelaufen\n(verfaelltAm < heute)\n(BR-031)
+
+ABGEHOLT --> [*]
+VERFALLEN --> [*]
+
+@enduml
+----

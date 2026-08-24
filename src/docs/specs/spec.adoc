@@ -1,0 +1,55 @@
+= Spezifikation: Leihgut — Werkzeugverleih einer Bibliothek der Dinge
+:toc: left
+:toclevels: 3
+:sectnums:
+:icons: font
+:revnumber: 1.0
+:revdate: 2026-08-24
+
+Dieses Dokument ist die vollständige Spezifikation des Systems _Leihgut_.
+Es basiert auf dem PRD (prd.adoc) und ergänzt es um Use Cases, Akzeptanzkriterien,
+Schnittstellenverträge, Entity Model und Zustandsautomaten.
+
+Grundlage: link:prd.adoc[PRD Leihgut v1.0]
+
+== Geschäftsregeln
+
+include::br.adoc[leveloffset=+1]
+
+== Domain-Modell und Zustandsautomaten
+
+include::entity-model.adoc[leveloffset=+1]
+
+== Use Cases
+
+=== UC-01 Gegenstand ausleihen
+
+include::uc-01-ausleihe.adoc[leveloffset=+2]
+
+=== UC-02 Ausleihe verlängern
+
+include::uc-02-verlaengerung.adoc[leveloffset=+2]
+
+=== UC-03 Rückgabe entgegennehmen
+
+include::uc-03-rueckgabe.adoc[leveloffset=+2]
+
+=== UC-04 Prüfung durchführen
+
+include::uc-04-pruefung.adoc[leveloffset=+2]
+
+=== UC-05 Wartung abschließen
+
+include::uc-05-wartung.adoc[leveloffset=+2]
+
+=== UC-06 Einweisung anlegen
+
+include::uc-06-einweisung.adoc[leveloffset=+2]
+
+=== UC-07 Verfügbarkeit abfragen und vormerken
+
+include::uc-07-vormerkung.adoc[leveloffset=+2]
+
+=== UC-08 Stammdaten verwalten
+
+include::uc-08-stammdaten.adoc[leveloffset=+2]

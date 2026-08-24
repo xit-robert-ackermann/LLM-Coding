@@ -1,0 +1,280 @@
+==== Persona Use Case
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Use Case ID
+|UC-05
+
+|Name
+|Wartung abschließen
+
+|Primary Actor
+|Rolf (Werkstattwart)
+
+|Stakeholders
+a|
+* *Rolf*: will den gewarteten Gegenstand umgehend wieder in den Betrieb bringen.
+* *Mitglieder in der Warteschlange*: wollen das Gerät so bald wie möglich erhalten.
+
+|Trigger
+|Rolf hat die physische Wartung eines Gegenstands abgeschlossen und will den Systemstatus aktualisieren.
+
+|Preconditions
+a|
+* Rolf ist mit Rolle `wart` angemeldet (BR-042, BR-039).
+* Der Gegenstand mit der angegebenen Inventarnummer existiert im System.
+* `Gegenstand.status` = `WARTUNGSFAELLIG`.
+
+|Main Success Scenario
+a|
+1. Rolf gibt `leihgut warte <inventarnummer>` ein.
+2. Das System sucht den Gegenstand anhand der Inventarnummer.
+3. Das System prüft: `Gegenstand.status` = `WARTUNGSFAELLIG`. ✓
+4. Das System setzt `Gegenstand.nutzungszaehler` = 0 (BR-025).
+5. Das System prüft, ob für die Kategorie des Gegenstands eine offene Vormerkung vorliegt.
+6. Keine Vormerkung vorhanden: Das System setzt `Gegenstand.status` → `VERFUEGBAR` (BR-025).
+7. Das System gibt eine Bestätigungsmeldung mit Inventarnummer, neuem Status und Nutzungszähler aus.
+
+|Extensions
+a|
+*2a – Gegenstand nicht gefunden:* +
+Das System gibt „Gegenstand nicht gefunden" aus und bricht ab.
+
+*3a – Gegenstand ist nicht wartungsfällig:* +
+Das System gibt „Gegenstand ist nicht wartungsfällig — Status: <aktueller Status>" aus und bricht ab.
+
+*5–6a – Vormerkung vorhanden, erstes Mitglied nicht gesperrt:* +
+Das System setzt `Gegenstand.status` → `RESERVIERT`, erstellt eine Reservierung für das erste Mitglied der Warteschlange (BR-029) und setzt `Vormerkung.status` → `RESERVIERT`.
+Die Ausgabe enthält Mitglieds-ID und Verfalldatum der Reservierung.
+
+*5–6b – Vormerkung vorhanden, erstes Mitglied gesperrt:* +
+Das System überspringt dieses Mitglied (BR-033), prüft die nächste Vormerkung und wiederholt
+den Schritt, bis ein nicht gesperrtes Mitglied gefunden wird oder die Warteschlange erschöpft ist.
+Ist die Warteschlange erschöpft, setzt das System `Gegenstand.status` → `VERFUEGBAR`.
+
+|Postconditions
+a|
+* `Gegenstand.nutzungszaehler` = 0.
+* `Gegenstand.status` = `VERFUEGBAR` oder `RESERVIERT`.
+* Falls `RESERVIERT`: eine aktive Reservierung existiert für das erste nicht gesperrte Mitglied der Warteschlange; das Mitglied behält seinen Platz in der Schlange.
+
+|Business Rules
+|BR-025, BR-026, BR-029, BR-030, BR-033, BR-039, BR-042
+|===
+
+==== Aktivitätsdiagramm
+
+[plantuml]
+....
+@startuml
+skinparam defaultTextAlignment center
+
+start
+
+:Rolf gibt\n`leihgut warte <inventarnummer>` ein;
+
+if (Gegenstand mit Inventarnummer\ngefunden?) then (nein)
+  #pink:Fehler:\n"Gegenstand nicht gefunden";
+  stop
+endif
+
+if (Gegenstand.status\n= WARTUNGSFAELLIG?) then (nein)
+  #pink:Fehler: "Gegenstand ist nicht\nwartungsfällig — Status: <Status>";
+  stop
+endif
+
+:Gegenstand.nutzungszaehler = 0;
+
+if (Offene Vormerkung für\nKategorie vorhanden?) then (nein)
+  :Gegenstand.status → VERFUEGBAR;
+  :Ausgabe: VERFUEGBAR, Zähler 0;
+  stop
+endif
+
+while (Nächste Vormerkung in\nWarteschlange vorhanden?) is (ja)
+  if (Mitglied gesperrt?) then (nein)
+    :Gegenstand.status → RESERVIERT;
+    :Reservierung erstellen;
+    :Vormerkung.status → RESERVIERT;
+    :Ausgabe: RESERVIERT für Mitglied,\nVerfalldatum, Zähler 0;
+    stop
+  else (ja)
+    :Mitglied überspringen\n(behält Platz in Warteschlange);
+  endif
+endwhile (erschöpft)
+
+:Gegenstand.status → VERFUEGBAR;
+:Ausgabe: VERFUEGBAR, Zähler 0;
+
+stop
+@enduml
+....
+
+==== System Use Case: CLI `leihgut warte`
+
+===== Kommando
+
+[source]
+----
+leihgut warte <inventarnummer> [--notiz <text>]
+----
+
+[cols="1,3"]
+|===
+|Parameter |Beschreibung
+
+|`<inventarnummer>`
+|Pflichtparameter. Eindeutige Inventarnummer des Gegenstands (z. B. `INV-042`).
+
+|`--notiz <text>`
+|Optional. Freitext, der als Wartungsnotiz am Gegenstand gespeichert wird.
+
+|`--rolle wart`
+|CLI-Flag zur Rollenangabe (BR-039). Ohne dieses Flag wird der Aufruf abgewiesen.
+|===
+
+===== Validierungen
+
+[cols="1,1,3"]
+|===
+|# |Bedingung |Fehlerreaktion (Exit-Code 1)
+
+|V-1
+|Gegenstand mit `inventarnummer` existiert.
+|`Gegenstand nicht gefunden`
+
+|V-2
+|`Gegenstand.status` = `WARTUNGSFAELLIG`.
+|`Gegenstand ist nicht wartungsfällig — Status: <aktueller Status>`
+|===
+
+Validierungen werden in dieser Reihenfolge geprüft.
+Der erste Fehler beendet die Verarbeitung.
+
+===== Verarbeitung
+
+1. `Gegenstand.nutzungszaehler` = 0 (BR-025).
+2. Prüfe offene Vormerkungen für die Kategorie des Gegenstands (FIFO-Reihenfolge, BR-028):
+   * *Vormerkung vorhanden und Mitglied nicht gesperrt:* `Gegenstand.status` → `RESERVIERT`,
+     Reservierung erstellen (Verfall: heute + 3 Kalendertage, BR-031),
+     `Vormerkung.status` → `RESERVIERT`. → Schritt 3.
+   * *Vormerkung vorhanden, aber Mitglied gesperrt:* Mitglied überspringen (BR-033),
+     nächste Vormerkung prüfen. → Schritt 2 wiederholen.
+   * *Keine (weiteren) Vormerkungen:* `Gegenstand.status` → `VERFUEGBAR` (BR-025). → Schritt 3.
+3. Ausgabe auf stdout.
+
+===== Ausgabe (stdout)
+
+Ohne Vormerker:
+
+[source]
+----
+Wartung abgeschlossen.
+Gegenstand:     INV-042 → VERFUEGBAR
+Nutzungszähler: 0
+----
+
+Mit Vormerker (Reservierung ausgelöst):
+
+[source]
+----
+Wartung abgeschlossen.
+Gegenstand:     INV-042 → RESERVIERT für Mitglied M-007 (verfällt: 2026-08-27)
+Nutzungszähler: 0
+----
+
+===== Fehlerfälle (stderr, Exit-Code 1)
+
+[source]
+----
+Fehler: Gegenstand nicht gefunden.
+----
+
+[source]
+----
+Fehler: Gegenstand ist nicht wartungsfällig — Status: VERFUEGBAR.
+----
+
+==== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: UC-05 Wartung abschließen
+
+  # BR-025
+  Scenario: Happy Path – Wartung abschließen ohne Vormerker
+    Given Gegenstand "INV-042" existiert mit Status "WARTUNGSFAELLIG" und nutzungszaehler 5
+    And keine offene Vormerkung für die Kategorie von "INV-042" existiert
+    When Rolf den Befehl "leihgut warte INV-042" ausführt
+    Then endet der Befehl mit Exit-Code 0
+    And Gegenstand "INV-042" hat Status "VERFUEGBAR"
+    And Gegenstand "INV-042" hat nutzungszaehler 0
+    And die Ausgabe enthält "INV-042 → VERFUEGBAR"
+    And die Ausgabe enthält "Nutzungszähler: 0"
+
+  # BR-025, BR-029, BR-031
+  Scenario: Happy Path – Wartung abschließen mit Vormerker
+    Given Gegenstand "INV-042" existiert mit Status "WARTUNGSFAELLIG" und nutzungszaehler 5
+    And Mitglied "M-007" hat eine offene Vormerkung für die Kategorie von "INV-042" (Platz 1 der Warteschlange)
+    And Mitglied "M-007" ist nicht gesperrt
+    When Rolf den Befehl "leihgut warte INV-042" ausführt
+    Then endet der Befehl mit Exit-Code 0
+    And Gegenstand "INV-042" hat Status "RESERVIERT"
+    And Gegenstand "INV-042" hat nutzungszaehler 0
+    And eine Reservierung für Mitglied "M-007" existiert mit Verfall in 3 Kalendertagen
+    And die Ausgabe enthält "INV-042 → RESERVIERT für Mitglied M-007"
+
+  # BR-025, BR-029, BR-033
+  Scenario: Vormerker ist gesperrt – nächster Vormerker wird reserviert
+    Given Gegenstand "INV-042" existiert mit Status "WARTUNGSFAELLIG"
+    And Mitglied "M-001" hat eine offene Vormerkung für die Kategorie von "INV-042" (Platz 1) und ist gesperrt
+    And Mitglied "M-007" hat eine offene Vormerkung für die Kategorie von "INV-042" (Platz 2) und ist nicht gesperrt
+    When Rolf den Befehl "leihgut warte INV-042" ausführt
+    Then endet der Befehl mit Exit-Code 0
+    And Gegenstand "INV-042" hat Status "RESERVIERT" für Mitglied "M-007"
+    And Mitglied "M-001" hat weiterhin eine offene Vormerkung für die Kategorie (Platz 1)
+    And die Ausgabe enthält "RESERVIERT für Mitglied M-007"
+
+  # Extension: Gegenstand nicht gefunden
+  Scenario: Gegenstand nicht gefunden
+    Given kein Gegenstand mit Inventarnummer "INV-999" existiert
+    When Rolf den Befehl "leihgut warte INV-999" ausführt
+    Then endet der Befehl mit Exit-Code 1
+    And die Fehlerausgabe enthält "Gegenstand nicht gefunden"
+
+  # Extension: falscher Status (BR-026)
+  Scenario: Gegenstand hat falschen Status
+    Given Gegenstand "INV-042" existiert mit Status "VERFUEGBAR"
+    When Rolf den Befehl "leihgut warte INV-042" ausführt
+    Then endet der Befehl mit Exit-Code 1
+    And die Fehlerausgabe enthält "Gegenstand ist nicht wartungsfällig — Status: VERFUEGBAR"
+----
+
+==== Anforderungen (EARS-Syntax)
+
+[cols="1,1,4"]
+|===
+|ID |Typ |Anforderung
+
+|EAR-05-01
+|When
+|*When* Rolf den Befehl `leihgut warte <inventarnummer>` für einen Gegenstand mit Status `WARTUNGSFAELLIG` ausführt, *shall* das System `Gegenstand.nutzungszaehler` auf 0 setzen und `Gegenstand.status` auf `VERFUEGBAR` setzen, sofern keine offene Vormerkung für die Kategorie vorliegt. (BR-025)
+
+|EAR-05-02
+|When
+|*When* der Befehl `leihgut warte` mit einer Inventarnummer aufgerufen wird, die im System nicht existiert, *shall* das System die Meldung „Gegenstand nicht gefunden" auf stderr ausgeben und mit Exit-Code 1 beenden.
+
+|EAR-05-03
+|When
+|*When* der Befehl `leihgut warte` für einen Gegenstand aufgerufen wird, dessen Status nicht `WARTUNGSFAELLIG` ist, *shall* das System die Meldung „Gegenstand ist nicht wartungsfällig — Status: <aktueller Status>" auf stderr ausgeben und mit Exit-Code 1 beenden. (BR-026)
+
+|EAR-05-04
+|When
+|*When* das System `Gegenstand.status` nach Wartungsabschluss auf `VERFUEGBAR` setzen würde und für die Kategorie des Gegenstands eine offene Vormerkung eines nicht gesperrten Mitglieds vorliegt, *shall* das System stattdessen `Gegenstand.status` auf `RESERVIERT` setzen, eine Reservierung für das erste nicht gesperrte Mitglied der Warteschlange erstellen und `Vormerkung.status` auf `RESERVIERT` setzen. (BR-029)
+
+|EAR-05-05
+|While
+|*While* für die Kategorie eines gerade gewarteten Gegenstands Vormerkungen vorliegen und alle vorgemerkten Mitglieder gesperrt sind, *shall* das System `Gegenstand.status` auf `VERFUEGBAR` setzen und die Warteschlangenpositionen der gesperrten Mitglieder unverändert lassen. (BR-033)
+|===

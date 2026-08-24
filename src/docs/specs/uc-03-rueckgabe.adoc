@@ -1,0 +1,343 @@
+==== Persona Use Case
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Use Case ID
+|UC-03
+
+|Name
+|Rückgabe entgegennehmen
+
+|Primary Actor
+|Karim (Thekendienst)
+
+|Stakeholders and Interests
+a|
+* *Mitglied*: Möchte die Rückgabe zügig erledigen und erwartet, dass die Kaution nach der Prüfung zurückkommt.
+* *Rolf (Wart)*: Braucht vollständige und präzise Auffälligkeiten, um die Prüfung korrekt durchzuführen und Kautionsabzüge zu begründen (BR-016, BR-017).
+
+|Trigger
+|Ein Mitglied erscheint mit einem Gegenstand an der Theke und möchte diesen zurückgeben.
+
+|Preconditions
+a|
+* Eine Ausleihe für den Gegenstand existiert und hat den Status `OFFEN`.
+* Der Gegenstand hat den Status `AUSGELIEHEN`.
+
+|Main Success Scenario
+a|
+1. Karim gibt die Ausleihe-ID oder Inventarnummer ein.
+2. Das System zeigt die Ausleihedetails: Mitglied, Gegenstand, Rückgabefrist und hinterlegte Kaution.
+3. Karim nimmt den Gegenstand entgegen und prüft ihn sichtbar auf Auffälligkeiten.
+4. Karim erfasst etwaige Auffälligkeiten im System (Freitext, optional, max. 1000 Zeichen).
+5. Karim bestätigt die Rückgabe.
+6. Das System speichert die Auffälligkeiten an der Ausleihe.
+7. Das System versetzt den Gegenstand in den Zustand `IN_PRUEFUNG` (BR-014).
+8. `Ausleihe.status` bleibt `OFFEN`. Die Kaution bleibt hinterlegt (BR-015, BR-020).
+9. Das System bestätigt die Entgegennahme und weist darauf hin, dass die Prüfung durch den Wart aussteht.
+
+|Extensions
+a|
+*1a. Ausleihe nicht gefunden*: +
+Das System meldet 404 AUSLEIHE_NICHT_GEFUNDEN. +
+Der Systemzustand bleibt unverändert. Use Case endet.
+
+*5a. Ausleihe bereits in Prüfung (`Gegenstand.status = IN_PRUEFUNG`)*: +
+Das System meldet 409 GEGENSTAND_NICHT_AUSGELIEHEN. +
+Der Gegenstand wurde bereits zur Prüfung übergeben. Use Case endet.
+
+*5b. Ausleihe nicht offen (`Ausleihe.status ≠ OFFEN`)*: +
+Das System meldet 409 AUSLEIHE_NICHT_OFFEN. +
+Die Ausleihe ist bereits abgeschlossen oder hat einen anderen ungültigen Status. Use Case endet.
+
+|Postconditions
+a|
+* `Gegenstand.status = IN_PRUEFUNG`
+* `Ausleihe.auffaelligkeiten` ist gespeichert (leer oder gefüllt).
+* `Ausleihe.status = OFFEN` (unverändert).
+* Die hinterlegte Kaution ist unverändert. Keine Kautionsbewegung hat stattgefunden.
+
+|Business Rules
+|BR-014, BR-015, BR-016, BR-039, BR-041
+|===
+
+==== Aktivitätsdiagramm
+
+[plantuml]
+....
+@startuml
+skinparam defaultFontName sans-serif
+skinparam ArrowColor #444444
+skinparam ActivityBorderColor #444444
+skinparam ActivityBackgroundColor #f9f9f9
+skinparam ActivityDiamondBackgroundColor #fffbe6
+skinparam NoteBackgroundColor #e8f4e8
+skinparam NoteBorderColor #888888
+
+title UC-03 Rückgabe entgegennehmen
+
+start
+
+:Mitglied erscheint an der Theke\nmit Gegenstand;
+:Karim gibt Ausleihe-ID oder\nInventarnummer ein;
+
+if (Ausleihe gefunden?) then (nein)
+  #FFC0CB:System: 404 AUSLEIHE_NICHT_GEFUNDEN;
+  stop
+else (ja)
+  if (Ausleihe.status = OFFEN?) then (nein)
+    #FFC0CB:System: 409 AUSLEIHE_NICHT_OFFEN;
+    stop
+  else (ja)
+    if (Gegenstand.status\n= AUSGELIEHEN?) then (nein)
+      #FFC0CB:System: 409 GEGENSTAND_NICHT_AUSGELIEHEN;
+      stop
+    else (ja)
+      :System zeigt Ausleihedetails\n(Mitglied, Gegenstand, Frist, Kaution);
+      :Karim nimmt Gegenstand entgegen\nund begutachtet ihn sichtbar;
+      :Karim erfasst Auffälligkeiten\n(Freitext, optional, max. 1000 Zeichen);
+      :Karim bestätigt Rückgabe;
+      fork
+        :Ausleihe.auffaelligkeiten\nwird gespeichert;
+      fork again
+        :Gegenstand.status\n→ IN_PRUEFUNG;
+      end fork
+      note right
+        Ausleihe.status bleibt OFFEN.
+        Kaution bleibt hinterlegt.
+        Kein Kautionseintrag (BR-020).
+      end note
+      :System antwortet 200 OK\nmit Hinweis auf ausstehende Prüfung;
+      stop
+    endif
+  endif
+endif
+
+@enduml
+....
+
+==== System Use Case: POST /ausleihen/\{id}/rueckgabe
+
+===== Eingabe und Validierung
+
+*Method*: `POST` +
+*Path*: `/ausleihen/{id}/rueckgabe` +
+*Header*: `X-Rolle: thekendienst` +
+*Content-Type*: `application/json`
+
+*Request Body*
+
+[source,json]
+----
+{
+  "auffaelligkeiten": "string (optional, max. 1000 Zeichen)"
+}
+----
+
+[cols="1,1,1,3"]
+|===
+|Feld |Typ |Pflicht |Regel
+
+|`auffaelligkeiten`
+|string
+|nein
+|Maximal 1000 Zeichen. Fehlt das Feld oder ist es `null`, wird ein leerer String gespeichert.
+|===
+
+*Validierungen — Reihenfolge ist verbindlich*
+
+[cols="1,4,2,2"]
+|===
+|Schritt |Prüfung |HTTP-Status |Fehlercode
+
+|1
+|Header `X-Rolle` hat den Wert `thekendienst` (BR-039, BR-041)
+|403
+|ROLLE_UNGUELTIG
+
+|2
+|Ausleihe mit `{id}` existiert
+|404
+|AUSLEIHE_NICHT_GEFUNDEN
+
+|3
+|`Ausleihe.status = OFFEN`
+|409
+|AUSLEIHE_NICHT_OFFEN
+
+|4
+|`Gegenstand.status = AUSGELIEHEN`
+|409
+|GEGENSTAND_NICHT_AUSGELIEHEN
+|===
+
+===== Verarbeitung
+
+Die folgenden Schritte werden atomar ausgeführt, sofern alle Validierungen bestanden sind:
+
+1. `Ausleihe.auffaelligkeiten` ← `body.auffaelligkeiten` (oder leer)
+2. `Gegenstand.status` → `IN_PRUEFUNG`
+
+`Ausleihe.status` bleibt `OFFEN`. +
+Die hinterlegte Kaution bleibt unverändert (BR-020). +
+Es entsteht kein Kautions-Audit-Eintrag, weil keine Kautionsbewegung stattfindet (BR-022).
+
+===== Erfolgsantwort
+
+*HTTP 200 OK*
+
+[source,json]
+----
+{
+  "ausleiheId": "string",
+  "inventarnummer": "string",
+  "gegenstandStatus": "IN_PRUEFUNG",
+  "hinweis": "Prüfung durch den Wart ausstehend. Kaution wird nach Prüfung freigegeben."
+}
+----
+
+===== Fehlerantworten
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Code |Nachricht
+
+|403
+|ROLLE_UNGUELTIG
+|Die Rückgabe darf nur vom Thekendienst erfasst werden.
+
+|404
+|AUSLEIHE_NICHT_GEFUNDEN
+|Es wurde keine Ausleihe mit der angegebenen ID gefunden.
+
+|409
+|AUSLEIHE_NICHT_OFFEN
+|Die Ausleihe ist nicht offen und kann nicht als Rückgabe erfasst werden.
+
+|409
+|GEGENSTAND_NICHT_AUSGELIEHEN
+|Der Gegenstand befindet sich nicht im Zustand AUSGELIEHEN.
+|===
+
+==== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: UC-03 Rückgabe entgegennehmen
+
+  Background:
+    Given eine Kategorie "Bohrmaschinen" mit Leihdauer 7 Tagen und Wartungsintervall 10
+    And ein Gegenstand mit Inventarnummer "BM-001" der Kategorie "Bohrmaschinen"
+      und Wiederbeschaffungswert 200 Euro
+    And ein Mitglied mit ID "M-01" und Name "Sabine"
+    And eine offene Ausleihe mit ID "A-01" fuer Mitglied "M-01" und Gegenstand "BM-001"
+    And Gegenstand "BM-001" hat Status "AUSGELIEHEN"
+
+  # BR-014, BR-015
+  Scenario: Rückgabe ohne Auffälligkeiten
+    When der Thekendienst POST /ausleihen/A-01/rueckgabe aufruft
+      | X-Rolle | thekendienst |
+    And der Request Body enthält kein Feld "auffaelligkeiten"
+    Then antwortet das System mit HTTP 200
+    And das Antwortfeld "gegenstandStatus" ist "IN_PRUEFUNG"
+    And das Antwortfeld "hinweis" enthält "Kaution wird nach Prüfung freigegeben"
+    And Gegenstand "BM-001" hat Status "IN_PRUEFUNG"
+    And Ausleihe "A-01" hat Status "OFFEN"
+    And Ausleihe "A-01" hat leere Auffälligkeiten
+
+  # BR-014, BR-015, BR-017
+  Scenario: Rückgabe mit Auffälligkeiten (Kratzer vermerkt)
+    When der Thekendienst POST /ausleihen/A-01/rueckgabe aufruft
+      | X-Rolle | thekendienst |
+    And der Request Body ist:
+      """
+      { "auffaelligkeiten": "Kratzer an der Gehäuseseite, links oben" }
+      """
+    Then antwortet das System mit HTTP 200
+    And das Antwortfeld "gegenstandStatus" ist "IN_PRUEFUNG"
+    And Gegenstand "BM-001" hat Status "IN_PRUEFUNG"
+    And Ausleihe "A-01" hat Status "OFFEN"
+    And Ausleihe "A-01" hat Auffälligkeiten "Kratzer an der Gehäuseseite, links oben"
+
+  # BR-014, BR-015
+  Scenario: Rückgabe einer überfälligen Ausleihe
+    Given die Rückgabefrist von Ausleihe "A-01" liegt zwei Tage in der Vergangenheit
+    When der Thekendienst POST /ausleihen/A-01/rueckgabe aufruft
+      | X-Rolle | thekendienst |
+    And der Request Body enthält kein Feld "auffaelligkeiten"
+    Then antwortet das System mit HTTP 200
+    And Gegenstand "BM-001" hat Status "IN_PRUEFUNG"
+    And Ausleihe "A-01" hat Status "OFFEN"
+
+  # BR-015, BR-020, BR-022
+  Scenario: Die Kaution ist nach der Rückgabe noch nicht freigegeben
+    When der Thekendienst POST /ausleihen/A-01/rueckgabe aufruft
+      | X-Rolle | thekendienst |
+    And der Request Body enthält kein Feld "auffaelligkeiten"
+    Then antwortet das System mit HTTP 200
+    And die hinterlegte Kaution fuer Ausleihe "A-01" ist unveraendert
+    And es existiert kein Kautionsfreigabe-Eintrag fuer Ausleihe "A-01"
+    And das Antwortfeld "hinweis" enthält "Kaution wird nach Prüfung freigegeben"
+
+  # BR-039, BR-041
+  Scenario: Ausleihe nicht gefunden
+    When der Thekendienst POST /ausleihen/UNBEKANNT/rueckgabe aufruft
+      | X-Rolle | thekendienst |
+    Then antwortet das System mit HTTP 404
+    And der Fehlercode ist "AUSLEIHE_NICHT_GEFUNDEN"
+
+  # BR-014
+  Scenario: Ausleihe bereits abgeschlossen
+    Given Ausleihe "A-01" hat Status "ABGESCHLOSSEN"
+    And Gegenstand "BM-001" hat Status "VERFUEGBAR"
+    When der Thekendienst POST /ausleihen/A-01/rueckgabe aufruft
+      | X-Rolle | thekendienst |
+    Then antwortet das System mit HTTP 409
+    And der Fehlercode ist "AUSLEIHE_NICHT_OFFEN"
+    And Gegenstand "BM-001" hat weiterhin Status "VERFUEGBAR"
+
+  # BR-014
+  Scenario: Gegenstand bereits in Prüfung
+    Given Gegenstand "BM-001" hat Status "IN_PRUEFUNG"
+    When der Thekendienst POST /ausleihen/A-01/rueckgabe aufruft
+      | X-Rolle | thekendienst |
+    Then antwortet das System mit HTTP 409
+    And der Fehlercode ist "GEGENSTAND_NICHT_AUSGELIEHEN"
+
+  # BR-039, BR-041
+  Scenario: Zugriffsversuch ohne Thekendienst-Rolle wird abgelehnt
+    When ein Aufrufer POST /ausleihen/A-01/rueckgabe aufruft
+      | X-Rolle | mitglied |
+    Then antwortet das System mit HTTP 403
+    And der Fehlercode ist "ROLLE_UNGUELTIG"
+    And Gegenstand "BM-001" hat weiterhin Status "AUSGELIEHEN"
+----
+
+==== Anforderungen (EARS-Syntax)
+
+[cols="1,1,4"]
+|===
+|ID |EARS-Typ |Anforderung
+
+|EARS-031
+|When
+|Wenn der Thekendienst eine Rückgabe für eine offene Ausleihe mit einem Gegenstand im Status AUSGELIEHEN bestätigt, *muss* das System den Gegenstand in den Status IN_PRUEFUNG versetzen und die Ausleihe offen lassen. (BR-014)
+
+|EARS-032
+|While
+|Solange ein Gegenstand den Status IN_PRUEFUNG hat und seine zugehörige Ausleihe offen ist, *darf* das System die Ausleihe nicht abschließen. Der Abschluss ist ausschließlich über ein Prüfprotokoll möglich. (BR-014, BR-016)
+
+|EARS-033
+|When
+|Wenn der Thekendienst bei der Rückgabe Auffälligkeiten erfasst, *muss* das System diese unverändert an der Ausleihe speichern, ohne einen Kautionsabzug vorzunehmen oder die Kaution freizugeben. (BR-015, BR-020)
+
+|EARS-034
+|If
+|Wenn der HTTP-Header `X-Rolle` nicht den Wert `thekendienst` trägt, *muss* das System den Aufruf von `POST /ausleihen/{id}/rueckgabe` mit HTTP 403 ablehnen und den Systemzustand unverändert lassen. (BR-039, BR-041)
+
+|EARS-035
+|When
+|Wenn eine der Validierungen — Ausleihe nicht gefunden, Ausleihe nicht offen, Gegenstand nicht ausgeliehen — fehlschlägt, *muss* das System die Rückgabe ablehnen und darf weder den Gegenstand- noch den Ausleihestatus verändern. (BR-014)
+|===

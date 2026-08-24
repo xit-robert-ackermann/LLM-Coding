@@ -1,0 +1,533 @@
+==== Persona Use Case
+
+[cols="1,4"]
+|===
+|Feld |Inhalt
+
+|Use Case ID
+|UC-04
+
+|Name
+|Prüfung durchführen
+
+|Primary Actor
+|Rolf (Werkstattwart)
+
+|Stakeholders und Interessen
+a|
+* *Rolf (Wart)*: Will die Prüfung effizient abschließen und Kautionsabzüge nachvollziehbar festhalten.
+* *Mitglied*: Will die Kaution korrekt und vollständig zurückerhalten.
+* *Nächstes Mitglied in der Warteschlange*: Will den Gegenstand so bald wie möglich abholen.
+* *Thekendienst*: Will jederzeit wissen, ob und wann ein Gegenstand wieder herausgegeben werden darf.
+
+|Trigger
+|Wart ruft `leihgut pruefe <ausleihe-id> --ergebnis <ergebnis>` auf.
+
+|Vorbedingungen
+a|
+* `Ausleihe.status = OFFEN` (BR-016)
+* `Gegenstand.status = IN_PRUEFUNG` (BR-014)
+* Benutzer hat Rolle `wart` (BR-042)
+
+|Nachbedingungen (Erfolg)
+a|
+* Prüfprotokoll mit Zeitstempel, Ergebnis, ggf. Abzug und Notiz ist persistent gespeichert (BR-016).
+* `Ausleihe.status = ABGESCHLOSSEN` (BR-016).
+* `Nutzungszähler` des Gegenstands um 1 erhöht (BR-023).
+* Mindestens eine Kautionsbewegung mit Zeitstempel und Auslöser erzeugt (BR-020, BR-022).
+* Gegenstand in genau einem der Folgezustände: `VERFUEGBAR`, `WARTUNGSFAELLIG`, `RESERVIERT` oder `AUSGEMUSTERT` (BR-018).
+
+|Nachbedingungen (Misserfolg)
+a|
+* Kein Prüfprotokoll erstellt.
+* Kein Zustandswechsel an Ausleihe, Gegenstand oder Kaution.
+
+|Hauptszenario
+a|
+1. Wart ruft `leihgut pruefe <ausleihe-id> --ergebnis OK` auf.
+2. System prüft: Ausleihe existiert, `status = OFFEN`, `Gegenstand.status = IN_PRUEFUNG`.
+3. System erstellt Prüfprotokoll (Ergebnis = OK, `erstelltAm` = heute).
+4. System erhöht `Nutzungszähler` um 1 (BR-023).
+5. System erstellt Kautionsbewegung FREIGABE über die volle hinterlegte Kaution (BR-020, BR-022).
+6. System setzt `Ausleihe.status → ABGESCHLOSSEN` (BR-016).
+7. System prüft: `Nutzungszähler < Kategorie.wartungsintervallAusleihen` → weiter mit Schritt 8.
+8. System prüft: Keine offene Vormerkung für die Kategorie → `Gegenstand.status → VERFUEGBAR`.
+9. System gibt Bestätigung auf stdout aus.
+
+|Extension 7a — Wartungsintervall erreicht (BR-024)
+a|
+7a.1. `Nutzungszähler >= Kategorie.wartungsintervallAusleihen`.
+7a.2. System setzt `Gegenstand.status → WARTUNGSFAELLIG`.
+7a.3. Keine Reservierung wird ausgelöst; die Warteschlange der Kategorie bleibt unverändert (BR-032).
+7a.4. Weiter mit Schritt 9.
+
+|Extension 8a — Vormerkung vorhanden, Mitglied nicht gesperrt (BR-029, BR-030)
+a|
+8a.1. System findet mindestens eine offene Vormerkung für die Kategorie des Gegenstands.
+8a.2. Das erste Mitglied der Warteschlange ist nicht gesperrt.
+8a.3. System erstellt Reservierung für dieses Mitglied (Verfall: heute + 3 Kalendertage, BR-031).
+8a.4. System setzt `Vormerkung.status → RESERVIERT`.
+8a.5. System setzt `Gegenstand.status → RESERVIERT`.
+8a.6. Weiter mit Schritt 9.
+
+|Extension 8b — Vormerkung vorhanden, Mitglied gesperrt (BR-033)
+a|
+8b.1. System findet mindestens eine offene Vormerkung für die Kategorie.
+8b.2. Das erste Mitglied der Warteschlange ist gesperrt (BR-034).
+8b.3. System überspringt dieses Mitglied; dessen Platz in der Warteschlange bleibt erhalten (BR-033).
+8b.4. Falls ein weiteres ungesperrtes Mitglied in der Warteschlange vorhanden: weiter mit 8a.3.
+8b.5. Falls kein ungesperrtes Mitglied in der Warteschlange: `Gegenstand.status → VERFUEGBAR`.
+8b.6. Weiter mit Schritt 9.
+
+|Extension — Ergebnis SCHADEN (BR-016, BR-017, BR-020, BR-021)
+a|
+3a.1. Wart gibt `--ergebnis SCHADEN --abzug <betrag-in-cent>` an.
+3a.2. System erstellt Prüfprotokoll mit Ergebnis SCHADEN und dem angegebenen Abzug.
+3a.3. System erstellt Kautionsbewegung ABZUG über `abzug`.
+3a.4. System erstellt Kautionsbewegung FREIGABE über `kaution − abzug` (sofern > 0).
+3a.5. Weiter mit Schritt 4. +
+      Folgezustand des Gegenstands richtet sich nach Nutzungszähler und Vormerkung wie im Hauptszenario (Schritt 7–8).
+
+|Extension — Ergebnis VERLOREN (BR-019)
+a|
+3b.1. Wart gibt `--ergebnis VERLOREN` an.
+3b.2. System ignoriert einen etwaigen `--abzug`-Parameter vollständig (BR-019).
+3b.3. System erstellt Prüfprotokoll mit Ergebnis VERLOREN.
+3b.4. System erstellt Kautionsbewegung ABZUG über die volle hinterlegte Kaution; keine FREIGABE (BR-019).
+3b.5. System erhöht `Nutzungszähler` um 1 und setzt `Ausleihe.status → ABGESCHLOSSEN`.
+3b.6. System setzt `Gegenstand.status → AUSGEMUSTERT` (BR-019).
+3b.7. Weiter mit Schritt 9; keine Reservierung wird ausgelöst.
+
+|Extension — Ergebnis IRREPARABEL (BR-018)
+a|
+3c.1. Wart gibt `--ergebnis IRREPARABEL` an, `--abzug` ist optional.
+3c.2. Falls `--abzug` angegeben: System erstellt Kautionsbewegung ABZUG + FREIGABE über den Rest.
+3c.3. Falls kein `--abzug`: System erstellt Kautionsbewegung FREIGABE über die volle Kaution.
+3c.4. System erhöht `Nutzungszähler` um 1 und setzt `Ausleihe.status → ABGESCHLOSSEN`.
+3c.5. System setzt `Gegenstand.status → AUSGEMUSTERT`.
+3c.6. Weiter mit Schritt 9; keine Reservierung wird ausgelöst.
+
+|Extension — Sperre endet (BR-034, BR-036)
+a|
+9a.1. Nach Abschluss der Ausleihe prüft das System, ob alle zuvor überfälligen Ausleihen des Mitglieds nun den Status `ABGESCHLOSSEN` haben (BR-036).
+9a.2. Trifft das zu, ist das Mitglied implizit entsperrt; keine explizite Aktion erforderlich.
+9a.3. Die reguläre Ausgabe auf stdout ändert sich dadurch nicht.
+
+|Extension — Validierungsfehler
+a|
+2a. Ausleihe mit `<id>` nicht gefunden → Fehler "Ausleihe nicht gefunden: <id>" (stderr, Exit 1).
+2b. `Ausleihe.status ≠ OFFEN` → Fehler "Ausleihe bereits abgeschlossen" (stderr, Exit 1).
+2c. `Gegenstand.status ≠ IN_PRUEFUNG` → Fehler "Gegenstand nicht in Prüfung" (stderr, Exit 1).
+2d. Ergebnis = SCHADEN und kein `--abzug` → Fehler "Abzug erforderlich bei SCHADEN" (stderr, Exit 1).
+2e. `abzug > hinterlegte Kaution` → Fehler "Abzug (<x> EUR) übersteigt hinterlegte Kaution (<y> EUR)" (stderr, Exit 1).
+
+|Offene Punkte
+|Keine.
+|===
+
+
+==== Aktivitätsdiagramm
+
+[plantuml]
+----
+@startuml
+skinparam defaultFontName Monospaced
+
+start
+
+:Wart ruft\n`leihgut pruefe <id> --ergebnis <X>` auf;
+
+if (Ausleihe mit <id> gefunden?) then (nein)
+  #pink:Fehler: Ausleihe nicht gefunden;
+  stop
+endif
+
+if (Ausleihe.status = OFFEN?) then (nein)
+  #pink:Fehler: Ausleihe bereits abgeschlossen;
+  stop
+endif
+
+if (Gegenstand.status = IN_PRUEFUNG?) then (nein)
+  #pink:Fehler: Gegenstand nicht in Prüfung;
+  stop
+endif
+
+if (Ergebnis = SCHADEN?) then (ja)
+  if (--abzug angegeben?) then (nein)
+    #pink:Fehler: Abzug erforderlich bei SCHADEN;
+    stop
+  endif
+  if (abzug <= hinterlegte Kaution?) then (nein)
+    #pink:Fehler: Abzug übersteigt Kaution;
+    stop
+  endif
+endif
+
+:Prüfprotokoll erstellen\n(ergebnis, abzug, notiz, erstelltAm);
+
+:Nutzungszähler += 1\n(BR-023);
+
+switch (Ergebnis)
+case (OK)
+  :Kautionsbewegung FREIGABE\nüber volle Kaution\n(BR-020);
+case (SCHADEN)
+  :Kautionsbewegung ABZUG\nüber abzug\n(BR-020, BR-021);
+  :Kautionsbewegung FREIGABE\nüber kaution − abzug\n(BR-020);
+case (VERLOREN)
+  :Kautionsbewegung ABZUG\nüber volle Kaution\n(BR-019);
+case (IRREPARABEL)
+  if (--abzug angegeben?) then (ja)
+    :Kautionsbewegung ABZUG\nüber abzug;
+    :Kautionsbewegung FREIGABE\nüber kaution − abzug;
+  else (nein)
+    :Kautionsbewegung FREIGABE\nüber volle Kaution;
+  endif
+endswitch
+
+:Ausleihe.status → ABGESCHLOSSEN\n(BR-016);
+
+if (Ergebnis = VERLOREN\noder IRREPARABEL?) then (ja)
+  :Gegenstand.status → AUSGEMUSTERT\n(BR-018, BR-019);
+  note right
+    Keine Reservierung,
+    keine Warteschlangen-Auflösung
+  end note
+  :Sperre prüfen\n(BR-036);
+  :Ausgabe auf stdout;
+  stop
+endif
+
+if (Nutzungszähler\n>= Wartungsintervall?) then (ja)
+  :Gegenstand.status → WARTUNGSFAELLIG\n(BR-024);
+  note right
+    Warteschlange bleibt unverändert,
+    keine Reservierung (BR-032)
+  end note
+  :Sperre prüfen\n(BR-036);
+  :Ausgabe auf stdout;
+  stop
+endif
+
+:Vormerkung für Kategorie suchen\n(BR-029);
+
+if (Offene Vormerkung\nvorhanden?) then (nein)
+  :Gegenstand.status → VERFUEGBAR;
+else (ja)
+  :Erstes Mitglied\nder Warteschlange prüfen;
+  if (Mitglied gesperrt?\n(BR-034)) then (ja)
+    note right
+      Platz in Warteschlange
+      bleibt erhalten (BR-033)
+    end note
+    :Nächste Vormerkung prüfen;
+    if (Ungesperrtes Mitglied\nin Warteschlange?) then (nein)
+      :Gegenstand.status → VERFUEGBAR;
+    else (ja)
+      :Reservierung erstellen\n(Verfall: heute + 3 Tage, BR-031);
+      :Vormerkung.status → RESERVIERT;
+      :Gegenstand.status → RESERVIERT\n(BR-029);
+    endif
+  else (nein)
+    :Reservierung erstellen\n(Verfall: heute + 3 Tage, BR-031);
+    :Vormerkung.status → RESERVIERT;
+    :Gegenstand.status → RESERVIERT\n(BR-029);
+  endif
+endif
+
+:Sperre prüfen:\nAlle überfälligen Ausleihen\ndes Mitglieds abgeschlossen?\n(BR-036);
+
+if (Sperre endet?) then (ja)
+  note right: Mitglied implizit entsperrt (BR-036)
+endif
+
+:Ausgabe auf stdout;
+
+stop
+@enduml
+----
+
+
+==== System Use Case: CLI `leihgut pruefe`
+
+===== Kommando
+
+[source,shell]
+----
+leihgut pruefe <ausleihe-id> \
+  --ergebnis <OK|SCHADEN|VERLOREN|IRREPARABEL> \
+  [--abzug <betrag-in-cent>] \
+  [--notiz <text>] \
+  [--rolle wart]
+----
+
+Die Rolle `wart` wird über `--rolle wart` mitgegeben oder aus dem Kontext entnommen (BR-039, BR-042).
+`<betrag-in-cent>` ist eine nicht-negative ganze Zahl (z. B. `2500` = 25,00 EUR).
+
+===== Validierung (in dieser Reihenfolge)
+
+[cols="1,3,3"]
+|===
+|Nr. |Bedingung |Fehler (stderr, Exit 1)
+
+|V-1
+|Ausleihe mit `<ausleihe-id>` existiert.
+|`Ausleihe nicht gefunden: <ausleihe-id>`
+
+|V-2
+|`Ausleihe.status = OFFEN`
+|`Ausleihe bereits abgeschlossen`
+
+|V-3
+|`Gegenstand.status = IN_PRUEFUNG`
+|`Gegenstand nicht in Prüfung`
+
+|V-4
+|Wenn `--ergebnis SCHADEN`: `--abzug` muss angegeben sein.
+|`Abzug erforderlich bei SCHADEN`
+
+|V-5
+|Wenn `--abzug` angegeben: `abzug <= hinterlegte Kaution`
+|`Abzug (45 EUR) übersteigt hinterlegte Kaution (25 EUR)`
+
+|V-6
+|Wenn `--ergebnis VERLOREN`: `--abzug` wird stillschweigend ignoriert (BR-019).
+|— (kein Fehler)
+
+|V-7
+|Wenn `--ergebnis IRREPARABEL`: `--abzug` ist optional.
+|— (kein Fehler)
+|===
+
+===== Verarbeitung
+
+Alle Schritte werden atomar ausgeführt oder vollständig zurückgerollt.
+
+[cols="1,5"]
+|===
+|Schritt |Aktion
+
+|1
+|Prüfprotokoll erstellen: `ergebnis`, `abzug` (0 falls nicht angegeben bei IRREPARABEL/OK), `notiz`, `erstelltAm = heute`.
+
+|2
+|`Gegenstand.nutzungszähler += 1` (BR-023).
+
+|3a — OK
+|Kautionsbewegung FREIGABE: voller Kautionsbetrag (BR-020, BR-022).
+
+|3b — SCHADEN
+|Kautionsbewegung ABZUG: `abzug`. +
+Kautionsbewegung FREIGABE: `kaution − abzug` (sofern > 0) (BR-020, BR-021, BR-022).
+
+|3c — VERLOREN
+|Kautionsbewegung ABZUG: voller Kautionsbetrag. Keine FREIGABE (BR-019, BR-022).
+
+|3d — IRREPARABEL
+|Kautionsbewegung ABZUG: `abzug` (falls angegeben). +
+Kautionsbewegung FREIGABE: `kaution − abzug` bzw. volle Kaution (BR-020, BR-022).
+
+|4
+|`Ausleihe.status → ABGESCHLOSSEN` (BR-016).
+
+|5
+|Neuen `Gegenstand.status` bestimmen: +
+• Ergebnis = VERLOREN oder IRREPARABEL → `AUSGEMUSTERT` (BR-018, BR-019). +
+• `Nutzungszähler >= Kategorie.wartungsintervallAusleihen` → `WARTUNGSFAELLIG` (BR-024). +
+• Offene Vormerkung und Mitglied nicht gesperrt → `RESERVIERT` (Reservierung erstellen, `Vormerkung.status → RESERVIERT`, BR-029). +
+• Offene Vormerkung und Mitglied gesperrt → nächste Vormerkung prüfen; bei keiner ungesperrten: `VERFUEGBAR` (BR-033). +
+• Sonst → `VERFUEGBAR`.
+
+|6
+|Sperre prüfen: Wenn alle zuvor überfälligen Ausleihen des Mitglieds nun `ABGESCHLOSSEN` sind, ist das Mitglied implizit entsperrt (BR-036).
+|===
+
+===== Ausgabe (stdout, Exit 0)
+
+[source]
+----
+Prüfung abgeschlossen.
+Ausleihe:       AU-12345 → ABGESCHLOSSEN
+Gegenstand:     INV-007  → VERFUEGBAR
+Nutzungszähler: 4 / 10
+Kaution:        Freigabe 25,00 EUR
+----
+
+Bei SCHADEN (Abzug 5,00 EUR von 25,00 EUR Kaution):
+
+[source]
+----
+Prüfung abgeschlossen.
+Ausleihe:       AU-12345 → ABGESCHLOSSEN
+Gegenstand:     INV-007  → VERFUEGBAR
+Nutzungszähler: 4 / 10
+Kaution:        Abzug 5,00 EUR | Freigabe 20,00 EUR
+----
+
+Bei VERLOREN:
+
+[source]
+----
+Prüfung abgeschlossen.
+Ausleihe:       AU-12345 → ABGESCHLOSSEN
+Gegenstand:     INV-007  → AUSGEMUSTERT
+Nutzungszähler: 4 / 10
+Kaution:        Abzug 25,00 EUR (vollständige Einbehaltung)
+----
+
+Bei ausgelöster Reservierung wird eine zusätzliche Zeile angehängt:
+
+[source]
+----
+Reservierung:   INV-007 für Mitglied M-042 (gültig bis 2026-08-14)
+----
+
+===== Fehlermeldungen (stderr, Exit 1)
+
+[source]
+----
+Ausleihe nicht gefunden: AU-99999
+Ausleihe bereits abgeschlossen
+Gegenstand nicht in Prüfung
+Abzug erforderlich bei SCHADEN
+Abzug (45,00 EUR) übersteigt hinterlegte Kaution (25,00 EUR)
+----
+
+
+==== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# BR-016, BR-020, BR-022, BR-023
+Feature: UC-04 Prüfung durchführen
+
+  Background:
+    Given Gegenstand "INV-007" der Kategorie "Bohrhammer" existiert
+    And Kategorie "Bohrhammer" hat Wartungsintervall 10 Ausleihen
+    And Gegenstand "INV-007" hat Nutzungszähler 3
+    And Mitglied "M-042" hat Ausleihe "AU-12345" mit Status OFFEN
+    And Gegenstand "INV-007" hat Status IN_PRUEFUNG
+    And hinterlegte Kaution für "AU-12345" beträgt 2500 Cent
+
+  # BR-016, BR-020, BR-022, BR-023
+  Scenario: Happy Path — Ergebnis OK, volle Freigabe, Gegenstand verfügbar
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis OK
+    Then Ausleihe "AU-12345" hat Status ABGESCHLOSSEN
+    And Gegenstand "INV-007" hat Status VERFUEGBAR
+    And Nutzungszähler von "INV-007" beträgt 4
+    And eine Kautionsbewegung FREIGABE über 2500 Cent für "AU-12345" existiert
+    And die Ausgabe enthält "Freigabe 25,00 EUR"
+    And die Ausgabe enthält "4 / 10"
+
+  # BR-023, BR-024
+  Scenario: Ergebnis OK, Wartungsintervall erreicht — Gegenstand wartungsfällig
+    Given Nutzungszähler von "INV-007" beträgt 9
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis OK
+    Then Gegenstand "INV-007" hat Status WARTUNGSFAELLIG
+    And Nutzungszähler von "INV-007" beträgt 10
+    And die Ausgabe enthält "WARTUNGSFAELLIG"
+    And die Ausgabe enthält "10 / 10"
+
+  # BR-016, BR-023, BR-029, BR-031
+  Scenario: Ergebnis OK mit offener Vormerkung — Reservierung wird ausgelöst
+    Given Mitglied "M-099" hat eine offene Vormerkung für Kategorie "Bohrhammer"
+    And Mitglied "M-099" ist nicht gesperrt
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis OK
+    Then Gegenstand "INV-007" hat Status RESERVIERT
+    And eine Reservierung für Mitglied "M-099" auf "INV-007" existiert
+    And Vormerkung von "M-099" hat Status RESERVIERT
+    And die Ausgabe enthält "Reservierung"
+    And die Ausgabe enthält "M-099"
+
+  # BR-016, BR-017, BR-020, BR-021, BR-022
+  Scenario: Ergebnis SCHADEN mit Abzug — Teilfreigabe
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis SCHADEN --abzug 500
+    Then Ausleihe "AU-12345" hat Status ABGESCHLOSSEN
+    And Gegenstand "INV-007" hat Status VERFUEGBAR
+    And eine Kautionsbewegung ABZUG über 500 Cent für "AU-12345" existiert
+    And eine Kautionsbewegung FREIGABE über 2000 Cent für "AU-12345" existiert
+    And die Ausgabe enthält "Abzug 5,00 EUR"
+    And die Ausgabe enthält "Freigabe 20,00 EUR"
+
+  # BR-019, BR-022
+  Scenario: Ergebnis VERLOREN — ausgemustert, volle Einbehaltung
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis VERLOREN
+    Then Ausleihe "AU-12345" hat Status ABGESCHLOSSEN
+    And Gegenstand "INV-007" hat Status AUSGEMUSTERT
+    And eine Kautionsbewegung ABZUG über 2500 Cent für "AU-12345" existiert
+    And keine Kautionsbewegung FREIGABE für "AU-12345" existiert
+    And die Ausgabe enthält "AUSGEMUSTERT"
+    And die Ausgabe enthält "vollständige Einbehaltung"
+
+  # BR-018, BR-020, BR-022
+  Scenario: Ergebnis IRREPARABEL ohne Abzug — ausgemustert, volle Freigabe
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis IRREPARABEL
+    Then Ausleihe "AU-12345" hat Status ABGESCHLOSSEN
+    And Gegenstand "INV-007" hat Status AUSGEMUSTERT
+    And eine Kautionsbewegung FREIGABE über 2500 Cent für "AU-12345" existiert
+    And keine Kautionsbewegung ABZUG für "AU-12345" existiert
+    And die Ausgabe enthält "AUSGEMUSTERT"
+
+  # BR-021
+  Scenario: Abzug übersteigt Kaution — Fehler
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis SCHADEN --abzug 9900
+    Then der Exit-Code ist 1
+    And stderr enthält "übersteigt hinterlegte Kaution"
+    And Ausleihe "AU-12345" hat Status OFFEN
+    And Gegenstand "INV-007" hat Status IN_PRUEFUNG
+
+  # BR-034, BR-035, BR-036
+  Scenario: Sperre endet nach Prüfung der letzten überfälligen Ausleihe
+    Given Mitglied "M-042" hat genau eine überfällige Ausleihe "AU-12345"
+    And "AU-12345" ist die einzige überfällige Ausleihe von "M-042"
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis OK
+    Then Ausleihe "AU-12345" hat Status ABGESCHLOSSEN
+    And Mitglied "M-042" hat keine aktive Sperre mehr
+----
+
+
+==== Anforderungen (EARS-Syntax)
+
+[cols="1,1,5"]
+|===
+|ID |EARS-Typ |Anforderung
+
+|REQ-UC04-01
+|When
+|*When* der Wart `leihgut pruefe` mit einer gültigen Ausleihe-ID aufruft, deren `status = OFFEN` und deren Gegenstand `status = IN_PRUEFUNG` hat, *shall* das System ein Prüfprotokoll mit Ergebnis, Abzug, Notiz und Zeitstempel persistent speichern und `Ausleihe.status → ABGESCHLOSSEN` setzen. (BR-016)
+
+|REQ-UC04-02
+|When
+|*When* eine Prüfung abgeschlossen wird, *shall* das System den `Nutzungszähler` des Gegenstands um genau 1 erhöhen, unabhängig vom Prüfergebnis. (BR-023)
+
+|REQ-UC04-03
+|When
+|*When* der `Nutzungszähler` nach der Erhöhung den Wert `Kategorie.wartungsintervallAusleihen` erreicht oder überschreitet und das Prüfergebnis weder VERLOREN noch IRREPARABEL ist, *shall* das System `Gegenstand.status → WARTUNGSFAELLIG` setzen statt VERFUEGBAR. (BR-024)
+
+|REQ-UC04-04
+|When
+|*When* das Prüfergebnis VERLOREN ist, *shall* das System die volle hinterlegte Kaution einbehalten (Kautionsbewegung ABZUG, keine FREIGABE) und `Gegenstand.status → AUSGEMUSTERT` setzen; ein etwaiger `--abzug`-Parameter *shall* ignoriert werden. (BR-019)
+
+|REQ-UC04-05
+|If
+|*If* nach einer Prüfung `Gegenstand.status → VERFUEGBAR` gesetzt wird und für die zugehörige Kategorie mindestens eine offene Vormerkung eines nicht gesperrten Mitglieds existiert, *shall* das System für das erste solche Mitglied der Warteschlange eine Reservierung erstellen und `Gegenstand.status → RESERVIERT` setzen. (BR-029)
+
+|REQ-UC04-06
+|When
+|*When* `--ergebnis SCHADEN` angegeben wird und kein `--abzug`-Parameter vorhanden ist, *shall* das System den Befehl mit der Fehlermeldung „Abzug erforderlich bei SCHADEN" ablehnen und keinen Zustandswechsel vornehmen. (BR-021)
+
+|REQ-UC04-07
+|When
+|*When* ein `--abzug`-Betrag angegeben wird, der die hinterlegte Kaution übersteigt, *shall* das System den Befehl mit der Fehlermeldung „Abzug (<x> EUR) übersteigt hinterlegte Kaution (<y> EUR)" ablehnen. (BR-021)
+
+|REQ-UC04-08
+|When
+|*When* nach dem Abschluss einer Prüfung alle zuvor überfälligen Ausleihen des betreffenden Mitglieds den Status ABGESCHLOSSEN haben, *shall* das System das Mitglied implizit entsperren, ohne eine explizite Nutzeraktion zu erfordern. (BR-036)
+
+|REQ-UC04-09
+|When
+|*When* eine Kautionsbewegung (FREIGABE oder ABZUG) durch eine Prüfung ausgelöst wird, *shall* das System einen Audit-Eintrag mit Zeitstempel, Betrag in Cent und Verweis auf das Prüfprotokoll erzeugen. (BR-022)
+
+|REQ-UC04-10
+|While
+|*While* eine Prüfung verarbeitet wird, *shall* das System alle Zustandsänderungen (Prüfprotokoll, Nutzungszähler, Kautionsbewegungen, Ausleihe-Status, Gegenstand-Status) atomar ausführen, sodass bei einem Fehler kein Teilzustand persistent bleibt. (BR-016, BR-020)
+|===

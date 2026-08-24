@@ -1,0 +1,718 @@
+==== Persona Use Case UC-07a: Verfügbarkeit abfragen
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Use-Case-ID
+|UC-07a
+
+|Name
+|Verfügbarkeit abfragen
+
+|Primary Actor
+|Sabine (Mitglied)
+
+|Beteiligte Akteure
+|REST-API (System)
+
+|Trigger
+|Sabine will wissen, ob ein Gerät einer bestimmten Kategorie aktuell ausgeliehen werden kann — bevor sie den Weg zur Theke antritt.
+
+|Vorbedingungen
+a|
+* Sabine ist als Mitglied im System erfasst.
+* Sie kennt die `kategorieId` des gewünschten Geräts.
+* HTTP-Header `X-Rolle: mitglied` ist gesetzt (BR-039, BR-040).
+
+|Nachbedingungen (Erfolg)
+|Sabine kennt den aktuellen Status aller Gegenstände der gesuchten Kategorie und kann entscheiden, ob sie sich auf den Weg macht oder vormerkt.
+
+|Nachbedingungen (Fehlschlag)
+|Systemzustand unverändert. Sabine erhält eine strukturierte Fehlermeldung.
+
+|Geschäftsregeln
+|BR-039, BR-040
+
+|Main Success Scenario
+a|
+. Sabine schickt `GET /gegenstaende?kategorieId=<X>` mit Header `X-Rolle: mitglied`.
+. Das System prüft die Rolle und gibt sie frei (BR-039, BR-040).
+. Das System liest alle Gegenstände der Kategorie aus dem Katalog.
+. Das System gibt eine Liste von Gegenständen mit Inventarnummer, Status und Kautionsbetrag zurück (HTTP 200).
+. Sabine sieht, welche Gegenstände `VERFUEGBAR` sind, und entscheidet sich für oder gegen eine Fahrt zur Theke.
+
+|Extensions
+a|
+*2a — Rolle fehlt oder ist falsch:* +
+System antwortet mit 403 Forbidden. Sabine erhält keine Daten.
+
+*3a — `kategorieId` existiert nicht im Katalog:* +
+System antwortet mit 404 Not Found. Sabine erhält eine Meldung „Kategorie nicht gefunden".
+
+*3b — Kategorie existiert, hat aber keine Gegenstände:* +
+System gibt eine leere Liste zurück (HTTP 200). Sabine sieht, dass keine Gegenstände erfasst sind.
+|===
+
+
+==== Persona Use Case UC-07b: Vormerken
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Use-Case-ID
+|UC-07b
+
+|Name
+|Vormerken
+
+|Primary Actor
+|Sabine (Mitglied)
+
+|Beteiligte Akteure
+|REST-API (System)
+
+|Trigger
+|Kein Gegenstand der gewünschten Kategorie ist verfügbar. Sabine möchte informiert werden, sobald eines frei wird — durch einen Platz in der Warteschlange.
+
+|Vorbedingungen
+a|
+* Sabine ist als Mitglied im System erfasst.
+* Sie kennt ihre `mitgliedId` und die `kategorieId`.
+* HTTP-Header `X-Rolle: mitglied` ist gesetzt (BR-039, BR-040).
+
+|Nachbedingungen (Erfolg — Warteschlange)
+a|
+* Eine Vormerkung für Sabine und die Kategorie existiert mit Status `WARTEND`.
+* Sabines Position in der Warteschlange ist bekannt.
+* Die Eingangszeit der Vormerkung ist gespeichert (FIFO-Basis gemäß BR-028).
+
+|Nachbedingungen (Erfolg — Sofortreservierung)
+a|
+* Ein vormals verfügbarer Gegenstand der Kategorie hat den Status `RESERVIERT`.
+* Eine Reservierung für Sabine mit Verfallsdatum (heute + 3 Kalendertage) ist angelegt (BR-031).
+* Keine Vormerkung wurde in die Warteschlange eingetragen.
+
+|Nachbedingungen (Fehlschlag)
+|Systemzustand unverändert. Sabine erhält eine strukturierte Fehlermeldung.
+
+|Geschäftsregeln
+|BR-026, BR-027, BR-028, BR-029, BR-031, BR-033, BR-039, BR-040
+
+|Main Success Scenario
+a|
+. Sabine hat UC-07a ausgeführt und festgestellt, dass alle Gegenstände der Kategorie ausgeliehen sind.
+. Sabine schickt `POST /vormerkungen` mit Body `{"mitgliedId": "...", "kategorieId": "..."}` und Header `X-Rolle: mitglied`.
+. Das System prüft die Rolle (BR-039, BR-040).
+. Das System stellt fest, dass Sabine als Mitglied existiert.
+. Das System stellt fest, dass die Kategorie existiert (BR-027).
+. Das System prüft, ob Sabine bereits eine aktive Vormerkung oder Reservierung für diese Kategorie hat.
+. Das System prüft, ob ein Gegenstand der Kategorie den Status `VERFUEGBAR` trägt.
+. Kein Gegenstand ist verfügbar: Das System legt eine Vormerkung mit Status `WARTEND` und Eingangszeit = jetzt an (BR-028).
+. Das System ermittelt Sabines Position in der Warteschlange und antwortet mit 201 Created.
+
+|Extensions
+a|
+*3a — Rolle fehlt oder ist falsch:* +
+System antwortet mit 403 Forbidden.
+
+*4a — `mitgliedId` existiert nicht:* +
+System antwortet mit 404 Not Found: „Mitglied nicht gefunden".
+
+*5a — `kategorieId` existiert nicht:* +
+System antwortet mit 404 Not Found: „Kategorie nicht gefunden".
+
+*6a — Sabine hat bereits eine aktive Vormerkung oder Reservierung für diese Kategorie:* +
+System antwortet mit 409 Conflict: „Bereits vorgemerkt". Kein Duplikat entsteht.
+
+*7a — Sabine ist gesperrt (BR-033):* +
+Das System legt die Vormerkung trotzdem an. +
+Die Antwort enthält den Hinweis: „Abholung erst nach Entsperrung möglich". +
+Wenn später eine Reservierung für Sabine entstehen würde, wird sie übersprungen; Sabines Platz bleibt erhalten (BR-033).
+
+*8a — Ein Gegenstand der Kategorie ist `VERFUEGBAR`:* +
+Anstelle einer Vormerkung erstellt das System sofort eine Reservierung. +
+Der Gegenstand wechselt auf Status `RESERVIERT`. +
+Wartungsfällige Gegenstände werden dabei nicht berücksichtigt (BR-026). +
+Antwort: 201 Created mit `sofortReserviert: true` und Reservierungsdetails.
+|===
+
+
+==== Aktivitätsdiagramm UC-07b: Vormerken
+
+[plantuml, uc-07b-aktivitaet, svg]
+----
+@startuml
+skinparam defaultFontName sans-serif
+skinparam activityBorderColor #444444
+skinparam activityBackgroundColor #FAFAFA
+skinparam activityArrowColor #333333
+
+start
+
+:POST /vormerkungen\nX-Rolle: mitglied;
+
+if (Rolle = mitglied?) then (nein)
+  :403 Forbidden;
+  stop
+endif
+
+if (Mitglied existiert?) then (nein)
+  :404 Not Found\n"Mitglied nicht gefunden";
+  stop
+endif
+
+if (Kategorie existiert?) then (nein)
+  :404 Not Found\n"Kategorie nicht gefunden";
+  stop
+endif
+
+if (Aktive Vormerkung oder Reservierung\nfür Mitglied+Kategorie?) then (ja)
+  :409 Conflict\n"Bereits vorgemerkt";
+  stop
+endif
+
+if (Gegenstand der Kategorie\nmit Status VERFUEGBAR\n(nicht WARTUNGSFAELLIG)?) then (ja)
+  :Reservierung anlegen\nGegenstand.status → RESERVIERT\nverfaelltAm = heute + 3 Tage;
+  :201 Created\nsofortReserviert: true\nmit Reservierungsdetails;
+  stop
+endif
+
+:Mitglied gesperrt?;
+note right
+  BR-033: Gesperrte Mitglieder
+  dürfen vormerken, aber nicht
+  abholen. Reservierung wird
+  übersprungen, Platz bleibt.
+end note
+
+:Vormerkung anlegen\nstatus = WARTEND\neingangszeit = jetzt\n(BR-027, BR-028);
+
+:Position in Warteschlange\nermitteln;
+
+if (Mitglied gesperrt?) then (ja)
+  :201 Created\npositionInWarteschlange = N\nHinweis: "Abholung erst nach\nEntspеrrung möglich";
+else (nein)
+  :201 Created\npositionInWarteschlange = N;
+endif
+
+stop
+@enduml
+----
+
+
+==== System Use Case: GET /gegenstaende
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Endpunkt
+|`GET /gegenstaende`
+
+|Rollen
+|`mitglied`, `thekendienst` (BR-039, BR-040, BR-041)
+
+|Beschreibung
+|Gibt eine gefilterte Liste von Gegenständen zurück. Für Mitglieder relevant zur Verfügbarkeitsabfrage (UC-07a).
+|===
+
+*Request*
+
+[cols="1,1,3"]
+|===
+|Parameter |Typ |Beschreibung
+
+|`kategorieId`
+|Query, optional
+|Filtert auf Gegenstände einer bestimmten Kategorie.
+
+|`status`
+|Query, optional
+|Filtert auf einen bestimmten Status. Enum: `VERFUEGBAR`, `AUSGELIEHEN`, `IN_PRUEFUNG`, `WARTUNGSFAELLIG`, `AUSGEMUSTERT`, `RESERVIERT`.
+
+|`X-Rolle`
+|Header, required
+|Rolle des Aufrufers. Gültige Werte: `mitglied`, `thekendienst`.
+|===
+
+*Response 200 OK*
+
+[source,json]
+----
+[
+  {
+    "inventarnummer": "string",
+    "kategorieId": "string",
+    "kategorieName": "string",
+    "status": "VERFUEGBAR|AUSGELIEHEN|IN_PRUEFUNG|WARTUNGSFAELLIG|AUSGEMUSTERT|RESERVIERT",
+    "kautionEuro": 0
+  }
+]
+----
+
+*Fehlercodes*
+
+[cols="1,3"]
+|===
+|Code |Bedeutung
+
+|400
+|Ungültiger `status`-Wert.
+
+|403
+|Fehlende oder unzulässige Rolle.
+|===
+
+
+==== System Use Case: GET /gegenstaende/{inventarnummer}
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Endpunkt
+|`GET /gegenstaende/{inventarnummer}`
+
+|Rollen
+|`mitglied`, `thekendienst` (BR-039, BR-040, BR-041)
+
+|Beschreibung
+|Gibt die Detailansicht eines einzelnen Gegenstands zurück, einschließlich Nutzungszähler und Leihdauer.
+|===
+
+*Request*
+
+[cols="1,1,3"]
+|===
+|Parameter |Typ |Beschreibung
+
+|`inventarnummer`
+|Path, required
+|Eindeutige Inventarnummer des Gegenstands (BR-001).
+
+|`X-Rolle`
+|Header, required
+|Rolle des Aufrufers.
+|===
+
+*Response 200 OK*
+
+[source,json]
+----
+{
+  "inventarnummer": "string",
+  "kategorieId": "string",
+  "kategorieName": "string",
+  "status": "VERFUEGBAR|AUSGELIEHEN|IN_PRUEFUNG|WARTUNGSFAELLIG|AUSGEMUSTERT|RESERVIERT",
+  "kautionEuro": 0,
+  "nutzungszaehler": 0,
+  "leihdauerTage": 0
+}
+----
+
+*Fehlercodes*
+
+[cols="1,3"]
+|===
+|Code |Bedeutung
+
+|403
+|Fehlende oder unzulässige Rolle.
+
+|404
+|Gegenstand mit dieser Inventarnummer nicht gefunden.
+|===
+
+
+==== System Use Case: POST /vormerkungen
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Endpunkt
+|`POST /vormerkungen`
+
+|Rolle
+|`mitglied` (BR-039, BR-040)
+
+|Beschreibung
+|Legt eine Vormerkung für eine Kategorie an oder erstellt sofort eine Reservierung, wenn ein Gegenstand verfügbar ist. Eine Vormerkung gilt für eine Kategorie, nicht für einen Gegenstand (BR-027).
+|===
+
+*Request Body*
+
+[source,json]
+----
+{
+  "mitgliedId": "string",
+  "kategorieId": "string"
+}
+----
+
+*Validierungen (in dieser Reihenfolge)*
+
+[cols="1,1,3"]
+|===
+|Schritt |Code |Bedingung
+
+|1
+|403
+|`X-Rolle` ≠ `mitglied` (BR-039, BR-040).
+
+|2
+|404
+|`mitgliedId` existiert nicht.
+
+|3
+|404
+|`kategorieId` existiert nicht.
+
+|4
+|409
+|Für Mitglied + Kategorie existiert bereits eine aktive Vormerkung (`WARTEND`) oder Reservierung (`AKTIV`).
+|===
+
+*Processing*
+
+[cols="1,3"]
+|===
+|Pfad |Verarbeitung
+
+|Verfügbarer Gegenstand vorhanden
+a|
+. System sucht einen Gegenstand der Kategorie mit Status `VERFUEGBAR`. Wartungsfällige Gegenstände werden nicht berücksichtigt (BR-026).
+. Gegenstand.status → `RESERVIERT`.
+. Reservierung anlegen: `reservierungId`, `inventarnummer`, `verfaelltAm` = heute + 3 Kalendertage (BR-031).
+. Antwort: 201 Created mit `sofortReserviert: true`.
+
+|Kein verfügbarer Gegenstand
+a|
+. Vormerkung anlegen: `eingangszeit` = jetzt, `status` = `WARTEND` (BR-028).
+. Position in der Warteschlange = Anzahl aktiver Vormerkungen mit früherer Eingangszeit + 1.
+. Antwort: 201 Created mit `positionInWarteschlange` und `sofortReserviert: false`.
+
+|Gesperrtes Mitglied
+a|
+Beide Pfade bleiben gültig. Vormerkung oder Sofortreservierung wird angelegt.
+Wenn später eine Reservierung aus der Warteschlange für das gesperrte Mitglied entstehen würde, wird sie übersprungen; der Platz bleibt erhalten (BR-033).
+|===
+
+*Response 201 Created — Vormerkung in Warteschlange*
+
+[source,json]
+----
+{
+  "vormerkungId": "string",
+  "kategorieId": "string",
+  "mitgliedId": "string",
+  "positionInWarteschlange": 3,
+  "sofortReserviert": false,
+  "hinweis": "Abholung erst nach Entsperrung möglich",
+  "reservierung": null
+}
+----
+
+Das Feld `hinweis` wird nur gesetzt, wenn das Mitglied gesperrt ist (BR-033). Andernfalls ist es `null` oder abwesend.
+
+*Response 201 Created — Sofortreservierung*
+
+[source,json]
+----
+{
+  "vormerkungId": null,
+  "kategorieId": "string",
+  "mitgliedId": "string",
+  "positionInWarteschlange": null,
+  "sofortReserviert": true,
+  "hinweis": null,
+  "reservierung": {
+    "reservierungId": "string",
+    "inventarnummer": "string",
+    "verfaelltAm": "YYYY-MM-DD"
+  }
+}
+----
+
+*Fehlercodes*
+
+[cols="1,3"]
+|===
+|Code |Bedeutung
+
+|403
+|Fehlende oder unzulässige Rolle.
+
+|404
+|Mitglied oder Kategorie nicht gefunden.
+
+|409
+|Bereits vorgemerkt: aktive Vormerkung oder Reservierung für Mitglied + Kategorie existiert.
+|===
+
+
+==== System Use Case: DELETE /vormerkungen/{id}
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Endpunkt
+|`DELETE /vormerkungen/{id}`
+
+|Rolle
+|`mitglied` (BR-039, BR-040)
+
+|Beschreibung
+|Zieht eine eigene Vormerkung zurück, sofern sie noch `WARTEND` ist. Reservierungen können nicht auf diesem Weg storniert werden.
+|===
+
+*Validierungen (in dieser Reihenfolge)*
+
+[cols="1,1,3"]
+|===
+|Schritt |Code |Bedingung
+
+|1
+|403
+|`X-Rolle` ≠ `mitglied`.
+
+|2
+|404
+|Vormerkung mit `id` existiert nicht.
+
+|3
+|403
+|Vormerkung gehört nicht zu der im Request-Kontext enthaltenen `mitgliedId`.
+
+|4
+|409
+|Vormerkung hat Status ≠ `WARTEND`, d. h. sie wurde bereits in eine Reservierung umgewandelt: „Bereits in Reservierung umgewandelt — Reservierung stattdessen stornieren".
+|===
+
+*Response*
+
+`204 No Content` — Vormerkung wurde gelöscht. Die Positionen der nachfolgenden Mitglieder in der Warteschlange rücken vor.
+
+*Fehlercodes*
+
+[cols="1,3"]
+|===
+|Code |Bedeutung
+
+|403
+|Fehlende Rolle oder Zugriff auf fremde Vormerkung.
+
+|404
+|Vormerkung nicht gefunden.
+
+|409
+|Vormerkung bereits in Reservierung umgewandelt.
+|===
+
+
+==== System Use Case: DELETE /reservierungen/{id}
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Endpunkt
+|`DELETE /reservierungen/{id}`
+
+|Rolle
+|`mitglied` (BR-039, BR-040)
+
+|Beschreibung
+|Storniert eine eigene aktive Reservierung. Löst anschließend die Warteschlange der Kategorie aus: Der Gegenstand geht an das nächste Mitglied oder wird verfügbar.
+|===
+
+*Validierungen (in dieser Reihenfolge)*
+
+[cols="1,1,3"]
+|===
+|Schritt |Code |Bedingung
+
+|1
+|403
+|`X-Rolle` ≠ `mitglied`.
+
+|2
+|404
+|Reservierung mit `id` existiert nicht.
+
+|3
+|403
+|Reservierung gehört nicht zur `mitgliedId` des Aufrufers.
+
+|4
+|409
+|Reservierung ist nicht `AKTIV` (bereits verfallen oder abgeholt).
+|===
+
+*Processing*
+
+. Reservierung.status → `STORNIERT`.
+. System prüft die Warteschlange der Kategorie:
+  .. Nächste aktive Vormerkung (`WARTEND`) vorhanden?
+  .. Zugehöriges Mitglied nicht gesperrt (BR-033)?
+  .. Dann: Gegenstand.status → `RESERVIERT`, neue Reservierung für dieses Mitglied anlegen (BR-029, BR-031).
+  .. Mitglied gesperrt: Überspringen, nächste Vormerkung prüfen; Platz des gesperrten Mitglieds bleibt (BR-033).
+  .. Keine passende Vormerkung: Gegenstand.status → `VERFUEGBAR`.
+
+*Response*
+
+`204 No Content`
+
+*Fehlercodes*
+
+[cols="1,3"]
+|===
+|Code |Bedeutung
+
+|403
+|Fehlende Rolle oder Zugriff auf fremde Reservierung.
+
+|404
+|Reservierung nicht gefunden.
+
+|409
+|Reservierung nicht mehr aktiv (verfallen oder abgeholt).
+|===
+
+
+==== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# UC-07a — Verfügbarkeit abfragen
+
+Feature: Verfügbarkeit abfragen (UC-07a)
+
+  # BR-040
+  Scenario: Gerät ist verfügbar
+    Given Kategorie "Bohrhammer" (kategorieId: "KAT-01") existiert
+    And Gegenstand "INV-001" der Kategorie "KAT-01" hat Status VERFUEGBAR
+    When Sabine GET /gegenstaende?kategorieId=KAT-01 mit X-Rolle: mitglied sendet
+    Then antwortet das System mit 200 OK
+    And die Liste enthält "INV-001" mit status "VERFUEGBAR"
+    # BR-040: Rolle mitglied darf abfragen
+
+  # BR-040
+  Scenario: Gerät ist ausgeliehen
+    Given Gegenstand "INV-001" der Kategorie "KAT-01" hat Status AUSGELIEHEN
+    When Sabine GET /gegenstaende?kategorieId=KAT-01 mit X-Rolle: mitglied sendet
+    Then antwortet das System mit 200 OK
+    And die Liste enthält "INV-001" mit status "AUSGELIEHEN"
+    # BR-040: Mitglied sieht tatsächlichen Status
+
+
+# UC-07b — Vormerken
+
+Feature: Vormerken (UC-07b)
+
+  # BR-027, BR-028
+  Scenario: Alle Geräte ausgeliehen — Sabine kommt in Warteschlange an Position 1
+    Given Kategorie "KAT-01" existiert
+    And alle Gegenstände der Kategorie "KAT-01" haben Status AUSGELIEHEN
+    And keine Vormerkung für "KAT-01" existiert
+    When Sabine POST /vormerkungen mit {"mitgliedId": "M-01", "kategorieId": "KAT-01"} und X-Rolle: mitglied sendet
+    Then antwortet das System mit 201 Created
+    And sofortReserviert ist false
+    And positionInWarteschlange ist 1
+    And eine Vormerkung mit status WARTEND existiert für M-01 und KAT-01
+    # BR-027: Vormerkung auf Kategorie, nicht Gegenstand
+    # BR-028: FIFO-Einreihung
+
+  # BR-026, BR-029
+  Scenario: Verfügbares Gerät vorhanden — sofortige Reservierung
+    Given Gegenstand "INV-001" der Kategorie "KAT-01" hat Status VERFUEGBAR
+    When Sabine POST /vormerkungen mit {"mitgliedId": "M-01", "kategorieId": "KAT-01"} und X-Rolle: mitglied sendet
+    Then antwortet das System mit 201 Created
+    And sofortReserviert ist true
+    And reservierung.inventarnummer ist "INV-001"
+    And reservierung.verfaelltAm ist heute + 3 Kalendertage
+    And Gegenstand "INV-001" hat Status RESERVIERT
+    # BR-026: Wartungsfällige Gegenstände werden nicht reserviert
+    # BR-029: Verfügbarer Gegenstand löst sofortige Reservierung aus
+
+  Scenario: Sabine ist bereits in der Warteschlange — kein Duplikat
+    Given eine aktive Vormerkung für Mitglied "M-01" und Kategorie "KAT-01" existiert
+    When Sabine POST /vormerkungen mit {"mitgliedId": "M-01", "kategorieId": "KAT-01"} und X-Rolle: mitglied sendet
+    Then antwortet das System mit 409 Conflict
+    And die Fehlermeldung lautet "Bereits vorgemerkt"
+    And keine weitere Vormerkung wurde angelegt
+
+  # BR-033
+  Scenario: Gesperrtes Mitglied darf vormerken — Hinweis auf Abholsperre
+    Given Mitglied "M-02" ist gesperrt (überfällige Ausleihe)
+    And alle Gegenstände der Kategorie "KAT-01" haben Status AUSGELIEHEN
+    When M-02 POST /vormerkungen mit {"mitgliedId": "M-02", "kategorieId": "KAT-01"} und X-Rolle: mitglied sendet
+    Then antwortet das System mit 201 Created
+    And sofortReserviert ist false
+    And hinweis enthält "Abholung erst nach Entsperrung möglich"
+    And eine Vormerkung mit status WARTEND existiert für M-02 und KAT-01
+    # BR-033: Sperre hindert Vormerkung nicht, wohl aber Abholung
+
+  # BR-031, BR-028, BR-029
+  Scenario: Reservierung verfällt nach 3 Tagen — nächstes Mitglied erhält Reservierung
+    Given Gegenstand "INV-001" der Kategorie "KAT-01" ist für Mitglied "M-01" reserviert
+    And verfaelltAm von Reservierung "RES-01" liegt in der Vergangenheit
+    And Mitglied "M-03" steht als nächstes in der Warteschlange für "KAT-01"
+    And Mitglied "M-03" ist nicht gesperrt
+    When das System den Reservierungsverfall von "RES-01" verarbeitet
+    Then Reservierung "RES-01" hat Status VERFALLEN
+    And eine neue Reservierung für "M-03" und "INV-001" wurde angelegt
+    And Gegenstand "INV-001" hat Status RESERVIERT
+    # BR-031: Reservierung verfällt nach 3 Kalendertagen
+    # BR-028: Nächstes Mitglied in FIFO-Reihenfolge
+    # BR-029: Verfügbarer Gegenstand → Reservierung
+
+  # BR-030
+  Scenario: Simultane Verfügbarkeit — 2 Gegenstände, 2 Reservierungen
+    Given 2 Gegenstände der Kategorie "KAT-01" werden gleichzeitig nach Prüfung verfügbar
+    And die Warteschlange für "KAT-01" enthält Mitglied "M-10" (Position 1) und "M-11" (Position 2)
+    When das System die Verfügbarkeit verarbeitet
+    Then Gegenstand 1 ist für "M-10" reserviert
+    And Gegenstand 2 ist für "M-11" reserviert
+    And die Warteschlange für "KAT-01" ist leer
+    # BR-030: Jeder gleichzeitig verfügbar gewordene Gegenstand löst eine eigene Reservierung aus
+----
+
+
+==== Anforderungen (EARS-Syntax)
+
+[cols="1,1,4"]
+|===
+|ID |EARS-Typ |Anforderung
+
+|EARS-UC07-01
+|When
+|*When* ein Mitglied `POST /vormerkungen` aufruft und kein Gegenstand der gewünschten Kategorie den Status `VERFUEGBAR` hat, *shall* das System eine Vormerkung mit Status `WARTEND` und Eingangszeit = jetzt anlegen und die Position in der Warteschlange zurückgeben. (BR-027, BR-028)
+
+|EARS-UC07-02
+|When
+|*When* ein Mitglied `POST /vormerkungen` aufruft und mindestens ein Gegenstand der gewünschten Kategorie den Status `VERFUEGBAR` hat, *shall* das System sofort eine Reservierung erstellen, den Gegenstand auf `RESERVIERT` setzen und `sofortReserviert: true` zurückgeben — ohne eine Vormerkung in die Warteschlange einzutragen. (BR-026, BR-029)
+
+|EARS-UC07-03
+|While
+|*While* ein Mitglied gesperrt ist, *shall* das System eine Vormerkung dieses Mitglieds annehmen und den Platz in der Warteschlange vergeben; eine aus dieser Warteschlange entstehende Reservierung *shall* übersprungen werden, ohne den Platz des Mitglieds zu entfernen. (BR-033)
+
+|EARS-UC07-04
+|If
+|*If* eine Reservierung drei Kalendertage nach ihrer Entstehung noch nicht abgeholt wurde, *shall* das System die Reservierung auf `VERFALLEN` setzen, den Gegenstand freigeben und die nächste aktive, nicht gesperrte Vormerkung der Kategorie in eine neue Reservierung umwandeln oder — wenn keine vorliegt — den Gegenstand auf `VERFUEGBAR` setzen. (BR-028, BR-031, BR-033)
+
+|EARS-UC07-05
+|When
+|*When* ein Mitglied `POST /vormerkungen` aufruft und bereits eine aktive Vormerkung oder Reservierung für dieselbe Mitglied-Kategorie-Kombination besteht, *shall* das System mit HTTP 409 und der Meldung „Bereits vorgemerkt" antworten und keinen neuen Datensatz anlegen.
+
+|EARS-UC07-06
+|While
+|*While* alle Gegenstände einer Kategorie den Status `WARTUNGSFAELLIG` tragen, *shall* das System neu eingehende Vormerkungen annehmen und in die Warteschlange einreihen; keine Reservierung *shall* aus wartungsfälligen Gegenständen entstehen. (BR-026, BR-032)
+
+|EARS-UC07-07
+|When
+|*When* mehrere Gegenstände derselben Kategorie gleichzeitig nach der Prüfung den Status `VERFUEGBAR` erhalten und Vormerkungen vorliegen, *shall* das System für jeden dieser Gegenstände eine separate Reservierung für das jeweils nächste Mitglied der Warteschlange erstellen. (BR-030)
+|===

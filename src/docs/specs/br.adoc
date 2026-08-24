@@ -1,0 +1,204 @@
+= Geschäftsregeln (Business Rules)
+:toc: left
+:toclevels: 2
+:sectnums:
+:icons: font
+
+Diese Datei listet alle atomaren Geschäftsregeln mit stabilen IDs.
+Jede Regel wird in mindestens einem Use Case referenziert und durch mindestens ein Gherkin-Szenario abgedeckt.
+
+== Katalog
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-001
+|Jeder Gegenstand hat eine eindeutige Inventarnummer und gehört zu genau einer Kategorie.
+
+|BR-002
+|Die Kategorie bestimmt die Leihdauer in Tagen, das Wartungsintervall in Ausleihen und die Einweisungspflicht (Boolean).
+
+|BR-003
+|Jeder Gegenstand hat einen Wiederbeschaffungswert in Euro (positiver Ganzbetrag).
+
+|BR-004
+|Die Kaution beträgt 20 % des Wiederbeschaffungswerts, kaufmännisch gerundet auf ganze Euro, mindestens 5 und höchstens 100 Euro.
+|===
+
+== Mitglieder
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-005
+|Das System führt einen minimalen Mitgliederstamm: Mitglieds-ID und Name.
+
+|BR-006
+|Mitglieder werden über die REST-API angelegt. Es gibt keine Deaktivierung.
+|===
+
+== Ausleihe
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-007
+|Ein Gegenstand wird nur ausgegeben, wenn er verfügbar oder für dieses Mitglied reserviert ist.
+
+|BR-008
+|Ein Mitglied darf höchstens drei Ausleihen gleichzeitig führen. Vormerkungen zählen nicht mit.
+
+|BR-009
+|Ein gesperrtes Mitglied leiht nicht aus.
+
+|BR-010
+|Ein einweisungspflichtiger Gegenstand geht nur an ein Mitglied mit dokumentierter Einweisung für diese Kategorie.
+
+|BR-011
+|Mit der Ausgabe wird die Kaution hinterlegt und die Rückgabefrist gesetzt: Ausgabedatum plus Leihdauer der Kategorie.
+
+|BR-012
+|Eine Verlängerung um die volle Leihdauer der Kategorie ist einmal je Ausleihe möglich.
+
+|BR-013
+|Eine Verlängerung ist ausgeschlossen, wenn für die Kategorie eine Vormerkung offen ist oder die Ausleihe bereits überfällig ist.
+|===
+
+== Rückgabe und Prüfung
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-014
+|Die Rückgabe an der Theke versetzt den Gegenstand in den Zustand „in Prüfung". Sie beendet die Ausleihe nicht.
+
+|BR-015
+|Der Thekendienst erfasst bei der Rückgabe Auffälligkeiten, entscheidet aber nicht über die Kaution.
+
+|BR-016
+|Der Wart führt die Prüfung durch und erstellt ein Prüfprotokoll. Das Prüfprotokoll schließt die Ausleihe ab und legt den Kautionsabzug fest.
+
+|BR-017
+|Ein Schaden wird der laufenden Ausleihe zugerechnet, es sei denn, er ist im Prüfprotokoll einer früheren Ausleihe bereits vermerkt.
+
+|BR-018
+|Nach der Prüfung geht der Gegenstand in genau einen dieser Zustände: verfügbar, wartungsfällig oder ausgemustert.
+
+|BR-019
+|„Verloren" ist ein mögliches Prüfergebnis des Warts. Es führt zur vollständigen Einbehaltung der Kaution und versetzt den Gegenstand in den Zustand „ausgemustert".
+|===
+
+== Kaution
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-020
+|Die Kaution wird bei der Ausgabe hinterlegt und mit dem Prüfprotokoll ganz oder teilweise freigegeben.
+
+|BR-021
+|Ein Kautionsabzug ist höchstens so hoch wie die hinterlegte Kaution.
+
+|BR-022
+|Jede Kautionsbewegung — Hinterlegung, Abzug, Freigabe — erzeugt einen Eintrag mit Zeitstempel, Betrag und Auslöser (Audit-Log).
+|===
+
+== Wartung
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-023
+|Jede abgeschlossene Ausleihe erhöht den Nutzungszähler des Gegenstands um eins.
+
+|BR-024
+|Erreicht der Nutzungszähler das Wartungsintervall der Kategorie, wird der Gegenstand nach der Prüfung wartungsfällig statt verfügbar.
+
+|BR-025
+|Der Wart setzt einen wartungsfälligen Gegenstand nach erledigter Wartung auf verfügbar und den Nutzungszähler auf null.
+
+|BR-026
+|Ein wartungsfälliger Gegenstand wird nicht ausgegeben und nicht reserviert.
+|===
+
+== Vormerkung und Reservierung
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-027
+|Eine Vormerkung gilt für eine Kategorie, nicht für einen einzelnen Gegenstand.
+
+|BR-028
+|Vormerkungen einer Kategorie bilden eine Warteschlange nach Eingangszeit (FIFO).
+
+|BR-029
+|Wird ein Gegenstand nach der Prüfung verfügbar und liegt eine Vormerkung vor, wird er für das erste Mitglied der Warteschlange reserviert.
+
+|BR-030
+|Werden mehrere Gegenstände einer Kategorie gleichzeitig nach der Prüfung verfügbar, löst jeder für sich eine Reservierung für das jeweils nächste Mitglied der Warteschlange aus.
+
+|BR-031
+|Eine Reservierung verfällt drei Kalendertage nach ihrer Entstehung. Der Gegenstand geht dann an das nächste Mitglied der Warteschlange oder wird verfügbar.
+
+|BR-032
+|Wird ein Gegenstand nach der Prüfung wartungsfällig, bleibt die Warteschlange unverändert. Es entsteht keine Reservierung.
+
+|BR-033
+|Ein gesperrtes Mitglied darf vormerken, aber nicht abholen. Eine für ein gesperrtes Mitglied entstehende Reservierung wird übersprungen; das Mitglied behält seinen Platz in der Warteschlange.
+|===
+
+== Sperre
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-034
+|Ein Mitglied ist gesperrt, sobald mindestens eine seiner Ausleihen überfällig ist.
+
+|BR-035
+|Überfällig bedeutet: Die Rückgabefrist liegt vor dem heutigen Datum und der Gegenstand ist nicht zurückgegeben.
+
+|BR-036
+|Die Sperre endet, wenn für alle überfälligen Ausleihen des Mitglieds die Prüfung abgeschlossen ist.
+|===
+
+== Einweisung
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-037
+|Eine Einweisung wird vom Wart über die CLI angelegt. Sie gilt für eine Person und eine Kategorie.
+
+|BR-038
+|Der Thekendienst prüft das Vorhandensein einer Einweisung, legt sie aber nicht an.
+|===
+
+== Rollen
+
+[cols="1,5"]
+|===
+|ID |Regel
+
+|BR-039
+|Rollen werden über einen HTTP-Header (`X-Rolle`) oder ein CLI-Flag (`--rolle`) mitgegeben und nicht kryptographisch geprüft.
+
+|BR-040
+|Rolle `mitglied`: darf Verfügbarkeit abfragen und vormerken.
+
+|BR-041
+|Rolle `thekendienst`: darf zusätzlich ausleihen, verlängern und Rückgaben entgegennehmen.
+
+|BR-042
+|Rolle `wart`: CLI-Rolle; darf prüfen, Wartung abschließen, ausmustert und Einweisungen anlegen.
+|===

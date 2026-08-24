@@ -1,0 +1,587 @@
+==== Persona Use Case
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Use Case ID
+|UC-01
+
+|Name
+|Gegenstand ausleihen
+
+|Primary Actor
+|Karim (Thekendienst)
+
+|Stakeholders and Interests
+a|
+* *Thekendienst* — will in dreißig Sekunden wissen, ob ein Gegenstand herausgegeben werden darf, ohne die Kaution im Kopf ausrechnen zu müssen.
+* *Mitglied* — will den reservierten oder verfügbaren Gegenstand erhalten.
+* *Verein* — will sicherstellen, dass nur berechtigte Mitglieder ausgabefähige Gegenstände erhalten und die Kaution korrekt hinterlegt wird.
+* *Wart* — will, dass einweisungspflichtige Geräte nicht ohne Nachweis ausgegeben werden.
+
+|Trigger
+|Ein Mitglied erscheint an der Theke und nennt die Inventarnummer des gewünschten Gegenstands sowie seine Mitglieds-ID.
+
+|Preconditions
+a|
+* Karim ist mit der Rolle `thekendienst` am System angemeldet (`X-Rolle: thekendienst`).
+* Das System ist erreichbar.
+
+|Main Success Scenario
+a|
+1. Karim gibt die Mitglieds-ID und die Inventarnummer in das System ein.
+2. Das System prüft, ob die Mitglieds-ID bekannt ist.
+3. Das System prüft, ob die Inventarnummer bekannt ist.
+4. Das System prüft, ob der Gegenstand verfügbar oder für dieses Mitglied reserviert ist (BR-007).
+5. Das System prüft, dass der Gegenstand nicht wartungsfällig ist (BR-026).
+6. Das System prüft, dass das Mitglied nicht gesperrt ist (BR-009, BR-034, BR-035).
+7. Das System prüft, dass das Mitglied weniger als drei offene Ausleihen hat (BR-008).
+8. Falls die Kategorie einweisungspflichtig ist: Das System prüft, dass für das Mitglied und diese Kategorie eine Einweisung vorliegt (BR-010).
+9. Das System legt eine neue Ausleihe an (status: OFFEN, ausgabeDatum: heute, rueckgabeFrist: heute + Kategorie.leihdauerTage, verlaengert: false).
+10. Das System setzt den Gegenstand auf AUSGELIEHEN.
+11. Das System berechnet die Kaution (20 % des Wiederbeschaffungswerts, min 5, max 100 Euro, kaufmännisch gerundet) und legt eine Kautionsbewegung HINTERLEGUNG an (BR-004, BR-011, BR-020, BR-022).
+12. Falls der Gegenstand vorher RESERVIERT war: Das System setzt die Reservierung auf ABGEHOLT.
+13. Das System gibt die Ausleih-Bestätigung mit Rückgabefrist und Kautionsbetrag zurück (HTTP 201).
+14. Karim übergibt den Gegenstand an das Mitglied und nennt die Rückgabefrist.
+
+|Extensions
+a|
+*4a. Gegenstand nicht verfügbar:* +
+Der Gegenstand hat den Status AUSGELIEHEN oder RESERVIERT für ein anderes Mitglied. +
+→ Das System antwortet mit 409 GEGENSTAND_NICHT_VERFUEGBAR. +
+→ Use Case endet ohne Ausgabe.
+
+*5a. Gegenstand wartungsfällig:* +
+Der Gegenstand hat den Status WARTUNGSFAELLIG. +
+→ Das System antwortet mit 409 GEGENSTAND_WARTUNGSFAELLIG. +
+→ Use Case endet ohne Ausgabe. +
+→ Karim informiert das Mitglied; der Wart muss die Wartung abschließen.
+
+*6a. Mitglied gesperrt:* +
+Das Mitglied hat mindestens eine überfällige Ausleihe (BR-034, BR-035). +
+→ Das System antwortet mit 409 MITGLIED_GESPERRT. +
+→ Use Case endet ohne Ausgabe. +
+→ Karim fordert das Mitglied auf, die überfälligen Gegenstände zurückzugeben.
+
+*7a. Maximale Ausleihzahl erreicht:* +
+Das Mitglied hat bereits drei offene Ausleihen (BR-008). +
+→ Das System antwortet mit 409 MAX_AUSLEIHEN_ERREICHT. +
+→ Use Case endet ohne Ausgabe.
+
+*8a. Einweisung fehlt:* +
+Die Kategorie ist einweisungspflichtig, aber für das Mitglied liegt keine gültige Einweisung für diese Kategorie vor (BR-010). +
+→ Das System antwortet mit 409 EINWEISUNG_FEHLT. +
+→ Use Case endet ohne Ausgabe. +
+→ Karim verweist das Mitglied an den Wart für eine Einweisung.
+
+*2a. Mitglied nicht gefunden:* +
+Die angegebene Mitglieds-ID ist im System nicht vorhanden. +
+→ Das System antwortet mit 404 MITGLIED_NICHT_GEFUNDEN. +
+→ Use Case endet ohne Ausgabe.
+
+*3a. Gegenstand nicht gefunden:* +
+Die angegebene Inventarnummer ist im System nicht vorhanden. +
+→ Das System antwortet mit 404 GEGENSTAND_NICHT_GEFUNDEN. +
+→ Use Case endet ohne Ausgabe.
+
+*Vorbedingung verletzt — Rolle fehlt:* +
+Der Aufruf erfolgt ohne die Rolle `thekendienst`. +
+→ Das System antwortet mit 403 ROLLE_UNGUELTIG. +
+→ Use Case endet.
+
+|Postconditions (Success)
+a|
+* Eine Ausleihe mit Status OFFEN ist im System gespeichert.
+* Der Gegenstand hat den Status AUSGELIEHEN.
+* Eine Kautionsbewegung HINTERLEGUNG ist im Audit-Log eingetragen (BR-022).
+* Falls zuvor RESERVIERT: Die Reservierung ist auf ABGEHOLT gesetzt.
+* Der Gegenstand wurde physisch an das Mitglied übergeben.
+
+|Postconditions (Failure)
+a|
+* Es wurden keine Datenbankänderungen vorgenommen.
+* Kein Gegenstand wurde ausgegeben.
+* Kein Kautionseintrag wurde angelegt.
+
+|Business Rules
+|BR-004, BR-007, BR-008, BR-009, BR-010, BR-011, BR-020, BR-022, BR-026, BR-034, BR-035, BR-039, BR-041
+|===
+
+==== Aktivitätsdiagramm
+
+[plantuml]
+----
+@startuml
+skinparam activityBackgroundColor #FAFAFA
+skinparam activityBorderColor #666666
+skinparam arrowColor #444444
+
+start
+
+:Karim gibt MitgliedId\nund Inventarnummer ein;
+
+if (Rolle = thekendienst?) then (nein)
+  :HTTP 403\nROLLE_UNGUELTIG;
+  stop
+endif
+
+if (MitgliedId existiert?) then (nein)
+  :HTTP 404\nMITGLIED_NICHT_GEFUNDEN;
+  stop
+endif
+
+if (Inventarnummer existiert?) then (nein)
+  :HTTP 404\nGEGENSTAND_NICHT_GEFUNDEN;
+  stop
+endif
+
+if (Status = VERFUEGBAR\noder (RESERVIERT und\nReservierung.mitgliedId = mitgliedId)?) then (nein)
+  :HTTP 409\nGEGENSTAND_NICHT_VERFUEGBAR;
+  stop
+endif
+
+if (Status = WARTUNGSFAELLIG?) then (ja)
+  :HTTP 409\nGEGENSTAND_WARTUNGSFAELLIG;
+  stop
+endif
+
+if (Mitglied gesperrt?\n(mind. eine Ausleihe überfällig)) then (ja)
+  :HTTP 409\nMITGLIED_GESPERRT;
+  stop
+endif
+
+if (Offene Ausleihen < 3?) then (nein)
+  :HTTP 409\nMAX_AUSLEIHEN_ERREICHT;
+  stop
+endif
+
+if (Kategorie.einweisungspflichtig?) then (ja)
+  if (Einweisung für Mitglied\n+ Kategorie vorhanden?) then (nein)
+    :HTTP 409\nEINWEISUNG_FEHLT;
+    stop
+  endif
+endif
+
+:Ausleihe anlegen\n(status: OFFEN,\nausgabeDatum: heute,\nrueckgabeFrist: heute + leihdauerTage,\nverlaengert: false);
+
+:Gegenstand.status → AUSGELIEHEN;
+
+:Kaution berechnen\n(20% von Wiederbeschaffungswert,\nmin 5, max 100 Euro, kaufm. gerundet)\nKautionsbewegung HINTERLEGUNG anlegen;
+
+if (Gegenstand war RESERVIERT?) then (ja)
+  :Reservierung → ABGEHOLT;
+endif
+
+:HTTP 201 Created\n(ausleiheId, inventarnummer,\nmitgliedId, ausgabeDatum,\nrueckgabeFrist, kautionEuro);
+
+:Karim übergibt Gegenstand\nan Mitglied;
+
+stop
+@enduml
+----
+
+==== System Use Case: REST POST /ausleihen
+
+===== Anfrage
+
+[cols="1,3"]
+|===
+|Attribut |Wert
+
+|Methode
+|POST
+
+|Pfad
+|/ausleihen
+
+|Header
+|`X-Rolle: thekendienst`
+
+|Content-Type
+|application/json
+
+|Request Body
+a|
+[source,json]
+----
+{
+  "mitgliedId": "string",
+  "inventarnummer": "string"
+}
+----
+|===
+
+===== Validierungen (in Prüfreihenfolge)
+
+[cols="1,3,2,2"]
+|===
+|Schritt |Bedingung |Fehler bei Verletzung |BR
+
+|1
+|Header `X-Rolle` hat den Wert `thekendienst`
+|403 ROLLE_UNGUELTIG
+|BR-039, BR-041
+
+|2
+|`mitgliedId` ist im System vorhanden
+|404 MITGLIED_NICHT_GEFUNDEN
+|—
+
+|3
+|`inventarnummer` ist im System vorhanden
+|404 GEGENSTAND_NICHT_GEFUNDEN
+|—
+
+|4
+|`Gegenstand.status = VERFUEGBAR` +
+oder +
+`(Gegenstand.status = RESERVIERT und Reservierung.mitgliedId = mitgliedId)`
+|409 GEGENSTAND_NICHT_VERFUEGBAR
+|BR-007
+
+|5
+|`Gegenstand.status ≠ WARTUNGSFAELLIG`
+|409 GEGENSTAND_WARTUNGSFAELLIG
+|BR-026
+
+|6
+|Mitglied hat keine offene Ausleihe, bei der `rueckgabeFrist < heute` und Gegenstand nicht zurückgegeben
+|409 MITGLIED_GESPERRT
+|BR-009, BR-034, BR-035
+
+|7
+|Anzahl offener Ausleihen des Mitglieds < 3
+|409 MAX_AUSLEIHEN_ERREICHT
+|BR-008
+
+|8
+|Falls `Kategorie.einweisungspflichtig = true`: Einweisung für `mitgliedId` und `kategorieId` vorhanden
+|409 EINWEISUNG_FEHLT
+|BR-010
+|===
+
+===== Verarbeitung bei Erfolg
+
+[cols="1,4"]
+|===
+|Schritt |Aktion
+
+|1
+|Ausleihe anlegen: `status = OFFEN`, `ausgabeDatum = heute`, `rueckgabeFrist = heute + Kategorie.leihdauerTage`, `verlaengert = false`
+
+|2
+|`Gegenstand.status → AUSGELIEHEN`
+
+|3
+|Kaution berechnen: `kautionEuro = clamp(round(Gegenstand.wiederbeschaffungswertEuro * 0.20), 5, 100)` +
+Kautionsbewegung anlegen: `typ = HINTERLEGUNG`, `betrag = kautionEuro`, `zeitstempel = jetzt`, `ausloeserId = ausleiheId`
+
+|4
+|Falls Gegenstand vorher RESERVIERT: Reservierung → ABGEHOLT
+|===
+
+===== Antwort bei Erfolg (HTTP 201 Created)
+
+[source,json]
+----
+{
+  "ausleiheId": "string",
+  "inventarnummer": "string",
+  "mitgliedId": "string",
+  "ausgabeDatum": "YYYY-MM-DD",
+  "rueckgabeFrist": "YYYY-MM-DD",
+  "kautionEuro": 0
+}
+----
+
+===== Fehlerantworten
+
+Alle Fehlerantworten folgen dem einheitlichen Fehlerformat:
+
+[source,json]
+----
+{
+  "code": "string",
+  "message": "string"
+}
+----
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Code |Nachricht
+
+|403
+|ROLLE_UNGUELTIG
+|Rolle thekendienst erforderlich.
+
+|404
+|MITGLIED_NICHT_GEFUNDEN
+|Mitglied mit ID '{mitgliedId}' nicht gefunden.
+
+|404
+|GEGENSTAND_NICHT_GEFUNDEN
+|Gegenstand mit Inventarnummer '{inventarnummer}' nicht gefunden.
+
+|409
+|GEGENSTAND_NICHT_VERFUEGBAR
+|Gegenstand '{inventarnummer}' ist nicht verfügbar.
+
+|409
+|GEGENSTAND_WARTUNGSFAELLIG
+|Gegenstand '{inventarnummer}' ist wartungsfällig und kann nicht ausgegeben werden.
+
+|409
+|MITGLIED_GESPERRT
+|Mitglied '{mitgliedId}' ist gesperrt wegen überfälliger Ausleihe.
+
+|409
+|MAX_AUSLEIHEN_ERREICHT
+|Mitglied '{mitgliedId}' hat bereits drei offene Ausleihen.
+
+|409
+|EINWEISUNG_FEHLT
+|Für Mitglied '{mitgliedId}' liegt keine Einweisung für diese Kategorie vor.
+|===
+
+==== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# UC-01: Gegenstand ausleihen — Akzeptanzkriterien
+# BR-004, BR-007, BR-008, BR-009, BR-010, BR-011, BR-020, BR-022, BR-026, BR-039, BR-041
+
+Feature: UC-01 Gegenstand ausleihen
+
+  Background:
+    Given die Kategorie "Bohrmaschine" hat eine Leihdauer von 14 Tagen
+      And die Kategorie "Bohrmaschine" ist nicht einweisungspflichtig
+      And der Gegenstand "B-042" gehört zur Kategorie "Bohrmaschine"
+        mit Wiederbeschaffungswert 60 Euro
+      And das Mitglied "M-001" existiert und ist nicht gesperrt
+        und hat 0 offene Ausleihen
+
+  # ---------------------------------------------------------------------------
+  # Happy Path: verfügbarer Gegenstand, ungesperrtes Mitglied, keine Einweisungspflicht
+  # BR-007, BR-008, BR-009, BR-011, BR-020, BR-022, BR-039, BR-041
+  # ---------------------------------------------------------------------------
+
+  Scenario: Erfolgreiche Ausleihe eines verfügbaren Gegenstands
+    # BR-007, BR-009, BR-011, BR-020, BR-022, BR-041
+    Given der Gegenstand "B-042" hat den Status VERFUEGBAR
+    When der Thekendienst POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "B-042"
+      und Header X-Rolle: thekendienst
+    Then ist der HTTP-Statuscode 201
+      And die Antwort enthält eine ausleiheId
+      And die Antwort enthält ausgabeDatum = heute
+      And die Antwort enthält rueckgabeFrist = heute + 14 Tage
+      And die Antwort enthält kautionEuro = 12
+      And der Gegenstand "B-042" hat den Status AUSGELIEHEN
+      And eine Kautionsbewegung HINTERLEGUNG über 12 Euro ist im Audit-Log
+
+  # ---------------------------------------------------------------------------
+  # Happy Path: reservierter Gegenstand für dieses Mitglied
+  # BR-007, BR-011, BR-020, BR-022, BR-041
+  # ---------------------------------------------------------------------------
+
+  Scenario: Erfolgreiche Ausleihe eines für das Mitglied reservierten Gegenstands
+    # BR-007, BR-011, BR-020, BR-022
+    Given der Gegenstand "B-042" hat den Status RESERVIERT
+      And die Reservierung von "B-042" ist für Mitglied "M-001"
+    When der Thekendienst POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "B-042"
+      und Header X-Rolle: thekendienst
+    Then ist der HTTP-Statuscode 201
+      And die Reservierung von "B-042" hat den Status ABGEHOLT
+      And der Gegenstand "B-042" hat den Status AUSGELIEHEN
+
+  # ---------------------------------------------------------------------------
+  # Extension: Gegenstand nicht verfügbar (anderes Mitglied hat ausgeliehen)
+  # BR-007
+  # ---------------------------------------------------------------------------
+
+  Scenario: Gegenstand wird von einem anderen Mitglied gehalten
+    # BR-007
+    Given der Gegenstand "B-042" hat den Status AUSGELIEHEN
+    When der Thekendienst POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "B-042"
+      und Header X-Rolle: thekendienst
+    Then ist der HTTP-Statuscode 409
+      And der Fehlercode ist GEGENSTAND_NICHT_VERFUEGBAR
+      And es wurde keine Ausleihe angelegt
+      And es wurde keine Kautionsbewegung angelegt
+
+  Scenario: Gegenstand ist für ein anderes Mitglied reserviert
+    # BR-007
+    Given der Gegenstand "B-042" hat den Status RESERVIERT
+      And die Reservierung von "B-042" ist für Mitglied "M-002"
+    When der Thekendienst POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "B-042"
+      und Header X-Rolle: thekendienst
+    Then ist der HTTP-Statuscode 409
+      And der Fehlercode ist GEGENSTAND_NICHT_VERFUEGBAR
+
+  # ---------------------------------------------------------------------------
+  # Extension: Mitglied gesperrt (überfällige Ausleihe)
+  # BR-009, BR-034, BR-035
+  # ---------------------------------------------------------------------------
+
+  Scenario: Gesperrtes Mitglied kann nicht ausleihen
+    # BR-009, BR-034, BR-035
+    Given der Gegenstand "B-042" hat den Status VERFUEGBAR
+      And Mitglied "M-001" hat eine Ausleihe mit rueckgabeFrist = vorgestern
+        und Gegenstand noch nicht zurückgegeben
+    When der Thekendienst POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "B-042"
+      und Header X-Rolle: thekendienst
+    Then ist der HTTP-Statuscode 409
+      And der Fehlercode ist MITGLIED_GESPERRT
+      And es wurde keine Ausleihe angelegt
+
+  # ---------------------------------------------------------------------------
+  # Extension: 3 Ausleihen bereits offen
+  # BR-008
+  # ---------------------------------------------------------------------------
+
+  Scenario: Mitglied hat bereits drei offene Ausleihen
+    # BR-008
+    Given der Gegenstand "B-042" hat den Status VERFUEGBAR
+      And Mitglied "M-001" hat 3 offene Ausleihen
+    When der Thekendienst POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "B-042"
+      und Header X-Rolle: thekendienst
+    Then ist der HTTP-Statuscode 409
+      And der Fehlercode ist MAX_AUSLEIHEN_ERREICHT
+      And es wurde keine Ausleihe angelegt
+
+  # ---------------------------------------------------------------------------
+  # Extension: Einweisung fehlt bei einweisungspflichtigem Gerät
+  # BR-010
+  # ---------------------------------------------------------------------------
+
+  Scenario: Einweisung fehlt bei einweisungspflichtigem Gerät
+    # BR-010
+    Given die Kategorie "Kettensaege" ist einweisungspflichtig
+      And der Gegenstand "K-007" gehört zur Kategorie "Kettensaege"
+        mit Status VERFUEGBAR
+      And Mitglied "M-001" hat keine Einweisung für die Kategorie "Kettensaege"
+    When der Thekendienst POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "K-007"
+      und Header X-Rolle: thekendienst
+    Then ist der HTTP-Statuscode 409
+      And der Fehlercode ist EINWEISUNG_FEHLT
+      And es wurde keine Ausleihe angelegt
+
+  Scenario: Einweisung liegt vor — Ausleihe wird durchgeführt
+    # BR-010
+    Given die Kategorie "Kettensaege" ist einweisungspflichtig
+      And der Gegenstand "K-007" gehört zur Kategorie "Kettensaege"
+        mit Status VERFUEGBAR
+      And Mitglied "M-001" hat eine Einweisung für die Kategorie "Kettensaege"
+    When der Thekendienst POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "K-007"
+      und Header X-Rolle: thekendienst
+    Then ist der HTTP-Statuscode 201
+
+  # ---------------------------------------------------------------------------
+  # Extension: Gegenstand wartungsfällig
+  # BR-026
+  # ---------------------------------------------------------------------------
+
+  Scenario: Wartungsfälliger Gegenstand kann nicht ausgegeben werden
+    # BR-026
+    Given der Gegenstand "B-042" hat den Status WARTUNGSFAELLIG
+    When der Thekendienst POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "B-042"
+      und Header X-Rolle: thekendienst
+    Then ist der HTTP-Statuscode 409
+      And der Fehlercode ist GEGENSTAND_WARTUNGSFAELLIG
+      And es wurde keine Ausleihe angelegt
+
+  # ---------------------------------------------------------------------------
+  # Kautionsberechnung: 20 % von Wiederbeschaffungswert, min 5, max 100, kaufmännisch gerundet
+  # BR-004
+  # ---------------------------------------------------------------------------
+
+  Scenario Outline: Kautionsberechnung nach BR-004
+    # BR-004
+    Given ein Gegenstand mit Wiederbeschaffungswert <wbw> Euro
+      und Status VERFUEGBAR
+      und Kategorie ohne Einweisungspflicht
+      und Mitglied "M-001" nicht gesperrt, 0 offene Ausleihen
+    When der Thekendienst die Ausleihe durchführt
+    Then beträgt die hinterlegte Kaution <kaution> Euro
+
+    Examples:
+      | wbw  | kaution | Anmerkung                              |
+      | 10   | 5       | 20% = 2 Euro → Minimum 5 greift        |
+      | 25   | 5       | 20% = 5 Euro → genau Minimum           |
+      | 60   | 12      | 20% = 12 Euro → Standardfall           |
+      | 100  | 20      | 20% = 20 Euro → Standardfall           |
+      | 250  | 50      | 20% = 50 Euro → Standardfall           |
+      | 500  | 100     | 20% = 100 Euro → genau Maximum         |
+      | 1000 | 100     | 20% = 200 Euro → Maximum 100 greift    |
+      | 27   | 5       | 20% = 5,40 Euro → gerundet 5, Minimum  |
+      | 32   | 6       | 20% = 6,40 Euro → kaufm. gerundet 6    |
+      | 35   | 7       | 20% = 7,00 Euro → exakt                |
+      | 37   | 7       | 20% = 7,40 Euro → kaufm. gerundet 7    |
+      | 38   | 8       | 20% = 7,60 Euro → kaufm. gerundet 8    |
+
+  # ---------------------------------------------------------------------------
+  # Rollenkontrolle
+  # BR-039, BR-041
+  # ---------------------------------------------------------------------------
+
+  Scenario: Aufruf ohne thekendienst-Rolle wird abgewiesen
+    # BR-039, BR-041
+    Given der Gegenstand "B-042" hat den Status VERFUEGBAR
+    When ein Aufrufer POST /ausleihen aufruft
+      mit mitgliedId "M-001" und inventarnummer "B-042"
+      und Header X-Rolle: mitglied
+    Then ist der HTTP-Statuscode 403
+      And der Fehlercode ist ROLLE_UNGUELTIG
+----
+
+==== Anforderungen (EARS-Syntax)
+
+[cols="1,4,1"]
+|===
+|ID |Anforderung |BR
+
+|REQ-UC01-001
+|When a request to POST /ausleihen is received with a role other than `thekendienst`, the system shall reject the request with HTTP 403 and error code ROLLE_UNGUELTIG without performing any state change.
+|BR-039, BR-041
+
+|REQ-UC01-002
+|When a loan is created, the system shall set the `rueckgabeFrist` to the `ausgabeDatum` plus the `leihdauerTage` of the item's category, and shall set `verlaengert` to false.
+|BR-011
+
+|REQ-UC01-003
+|While a member has at least one open loan whose `rueckgabeFrist` is before today and whose item has not been returned, the system shall treat the member as blocked and shall reject any new loan request for that member with HTTP 409 and error code MITGLIED_GESPERRT.
+|BR-009, BR-034, BR-035
+
+|REQ-UC01-004
+|When a loan is successfully created, the system shall record a HINTERLEGUNG entry in the audit log containing the loan ID as `ausloeserId`, the computed `kautionEuro` as `betrag`, and the current timestamp.
+|BR-020, BR-022
+
+|REQ-UC01-005
+|When a member already has three open loans, the system shall reject any further loan request for that member with HTTP 409 and error code MAX_AUSLEIHEN_ERREICHT. Pending Vormerkungen shall not count towards this limit.
+|BR-008
+
+|REQ-UC01-006
+|If the category of the requested item has `einweisungspflichtig = true`, then the system shall verify that an Einweisung exists for the combination of member and category before proceeding, and shall reject the request with HTTP 409 and error code EINWEISUNG_FEHLT if no such Einweisung is found.
+|BR-010
+
+|REQ-UC01-007
+|When the requested item has status WARTUNGSFAELLIG, the system shall reject the loan request with HTTP 409 and error code GEGENSTAND_WARTUNGSFAELLIG without altering any data.
+|BR-026
+
+|REQ-UC01-008
+|When a loan is created for an item that was previously RESERVIERT for the same member, the system shall set that reservation's status to ABGEHOLT as part of the same atomic transaction.
+|BR-007
+
+|REQ-UC01-009
+|When computing the Kaution, the system shall calculate 20 percent of the item's `wiederbeschaffungswertEuro`, round the result to the nearest whole Euro using commercial rounding (half up), and then clamp the value to a minimum of 5 Euro and a maximum of 100 Euro.
+|BR-004
+|===

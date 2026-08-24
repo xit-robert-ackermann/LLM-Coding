@@ -1,0 +1,582 @@
+==== Persona Use Case
+
+[cols="2,5", options="header"]
+|===
+|Feld |Inhalt
+
+|Use Case
+|UC-08 Stammdaten verwalten
+
+|Primärer Akteur
+|Karim (Thekendienst)
+
+|Stakeholder und Interessen
+a|
+* *Karim (Thekendienst)*: Will Kategorien, Gegenstände und Mitglieder schnell und fehlerfrei erfassen, ohne Fachwissen über Kautionsberechnung mitbringen zu müssen.
+* *Mitglieder*: Wollen unter ihrer korrekten ID geführt werden und faire, nachvollziehbare Kautionen.
+* *Verein*: Will einen vollständigen, konsistenten Grunddatenbestand, auf den alle anderen Use Cases aufbauen können.
+
+|Auslöser
+a|
+* Ein neues Gerät wird angeschafft und soll verliehen werden können.
+* Eine neue Gerätekategorie wird eingeführt.
+* Ein neues Mitglied tritt bei und soll erstmalig ausleihen.
+
+|Vorbedingungen
+a|
+* Der Aufrufende trägt die Rolle `thekendienst` im HTTP-Header `X-Rolle` (BR-039, BR-041).
+* Das System ist erreichbar.
+
+|Nachbedingungen (Erfolg)
+a|
+* Die neue Kategorie, der neue Gegenstand oder das neue Mitglied ist dauerhaft gespeichert.
+* Ein neuer Gegenstand hat den Status `VERFUEGBAR` und Nutzungszähler `0`.
+* Die Kaution des Gegenstands ist korrekt nach BR-004 berechnet.
+* Alle anderen Use Cases können die angelegten Stammdaten sofort nutzen.
+
+|Nachbedingungen (Misserfolg)
+a|
+* Das System ist unverändert; kein inkonsistenter Zustand entsteht.
+* Der Aufrufer erhält eine eindeutige Fehlermeldung.
+
+|Haupterfolgsszenario
+a|
+1. Karim öffnet die Thekensoftware.
+2. Karim legt eine Kategorie an: sendet `POST /kategorien` mit Name, Leihdauer, Wartungsintervall und Einweisungspflicht.
+3. Das System prüft die Eingaben, berechnet keine abgeleiteten Werte und antwortet mit `201 Created` und der neuen Kategorie-ID.
+4. Karim legt einen Gegenstand an: sendet `POST /gegenstaende` mit Inventarnummer, Kategorie-ID und Wiederbeschaffungswert.
+5. Das System prüft die Eingaben, berechnet die Kaution (BR-004) und antwortet mit `201 Created`.
+6. Karim legt ein Mitglied an: sendet `POST /mitglieder` mit Mitglieds-ID und Name.
+7. Das System prüft die Eingaben und antwortet mit `201 Created`.
+8. Die Stammdaten stehen allen weiteren Use Cases zur Verfügung.
+
+|Erweiterungen
+a|
+2a. Kategoriename ist leer → `400 Bad Request`. Karim korrigiert die Eingabe. +
+2b. Kategoriename bereits vorhanden → `409 Conflict`. Karim wählt einen anderen Namen. +
+4a. Inventarnummer bereits vorhanden → `409 Conflict`. Karim prüft das Inventarverzeichnis. +
+4b. Kategorie-ID nicht vorhanden → `404 Not Found`. Karim legt die Kategorie zuerst an. +
+4c. Wiederbeschaffungswert ≤ 0 → `400 Bad Request`. Karim korrigiert den Wert. +
+6a. Mitglieds-ID bereits vorhanden → `409 Conflict` mit „Mitglied bereits vorhanden". Karim prüft die ID. +
+*a. Rolle ist nicht `thekendienst` → `403 Forbidden` bei jedem der obigen Aufrufe.
+
+|Fachliche Regeln
+|BR-001, BR-002, BR-003, BR-004, BR-005, BR-006, BR-039, BR-041
+|===
+
+==== Aktivitätsdiagramm
+
+Der folgende Abhängigkeitsgraph zeigt, in welcher Reihenfolge Stammdaten angelegt werden müssen.
+Gegenstände setzen eine existierende Kategorie voraus.
+Mitglieder sind unabhängig davon und können jederzeit angelegt werden.
+
+[plantuml]
+----
+@startuml
+title Abhängigkeitsgraph – Stammdaten anlegen (UC-08)
+
+skinparam ActivityBackgroundColor #f5f5f5
+skinparam ActivityBorderColor #666666
+skinparam ArrowColor #333333
+
+start
+
+fork
+  :POST /kategorien\n**Kategorie anlegen**;
+  note right
+    Voraussetzung für
+    alle Gegenstände
+    dieser Kategorie
+  end note
+  :POST /gegenstaende\n**Gegenstand anlegen**;
+  note right
+    Benötigt gültige kategorieId
+    Kaution wird berechnet (BR-004)
+  end note
+fork again
+  :POST /mitglieder\n**Mitglied anlegen**;
+  note right
+    Unabhängig von Kategorien
+    und Gegenständen
+  end note
+end fork
+
+stop
+@enduml
+----
+
+==== System Use Cases (REST)
+
+===== POST /kategorien
+
+*Beschreibung:* Legt eine neue Kategorie an. +
+*Erforderliche Rolle:* `thekendienst`
+
+*Request Body:*
+
+[source,json]
+----
+{
+  "name": "Bohrmaschinen",
+  "leihdauerTage": 7,
+  "wartungsintervallAusleihen": 20,
+  "einweisungspflichtig": false
+}
+----
+
+*Validierungen (in dieser Reihenfolge):*
+
+[cols="1,3,1,2", options="header"]
+|===
+|Nr. |Bedingung |HTTP-Status |Fehlermeldung
+
+|1
+|Rolle im Header `X-Rolle` ist nicht `thekendienst`
+|403 Forbidden
+|—
+
+|2
+|`name` ist leer oder fehlt
+|400 Bad Request
+|„name darf nicht leer sein"
+
+|3
+|`name` existiert bereits (case-sensitive)
+|409 Conflict
+|„Kategorie existiert bereits"
+
+|4
+|`leihdauerTage` ≤ 0 oder fehlt
+|400 Bad Request
+|„leihdauerTage muss größer als 0 sein"
+
+|5
+|`wartungsintervallAusleihen` ≤ 0 oder fehlt
+|400 Bad Request
+|„wartungsintervallAusleihen muss größer als 0 sein"
+|===
+
+*Response 201 Created:*
+
+[source,json]
+----
+{
+  "kategorieId": "KAT-001",
+  "name": "Bohrmaschinen",
+  "leihdauerTage": 7,
+  "wartungsintervallAusleihen": 20,
+  "einweisungspflichtig": false
+}
+----
+
+*Fachliche Regeln:* BR-002, BR-039, BR-041
+
+---
+
+===== GET /kategorien
+
+*Beschreibung:* Gibt alle Kategorien zurück. +
+*Erforderliche Rolle:* `mitglied` oder `thekendienst`
+
+*Response 200 OK:*
+
+[source,json]
+----
+[
+  {
+    "kategorieId": "KAT-001",
+    "name": "Bohrmaschinen",
+    "leihdauerTage": 7,
+    "wartungsintervallAusleihen": 20,
+    "einweisungspflichtig": false
+  }
+]
+----
+
+Bei leerer Datenbank: leeres Array `[]`.
+
+*Fachliche Regeln:* BR-002
+
+---
+
+===== POST /gegenstaende
+
+*Beschreibung:* Legt einen neuen Gegenstand an und berechnet die Kaution automatisch. +
+*Erforderliche Rolle:* `thekendienst`
+
+*Request Body:*
+
+[source,json]
+----
+{
+  "inventarnummer": "INV-042",
+  "kategorieId": "KAT-001",
+  "wiederbeschaffungswertEuro": 150
+}
+----
+
+*Validierungen (in dieser Reihenfolge):*
+
+[cols="1,3,1,2", options="header"]
+|===
+|Nr. |Bedingung |HTTP-Status |Fehlermeldung
+
+|1
+|Rolle im Header `X-Rolle` ist nicht `thekendienst`
+|403 Forbidden
+|—
+
+|2
+|`inventarnummer` ist leer oder fehlt
+|400 Bad Request
+|„inventarnummer darf nicht leer sein"
+
+|3
+|`inventarnummer` existiert bereits
+|409 Conflict
+|„Gegenstand mit dieser Inventarnummer existiert bereits"
+
+|4
+|`kategorieId` existiert nicht
+|404 Not Found
+|„Kategorie nicht gefunden"
+
+|5
+|`wiederbeschaffungswertEuro` ≤ 0 oder fehlt
+|400 Bad Request
+|„wiederbeschaffungswertEuro muss größer als 0 sein"
+|===
+
+*Verarbeitung — Kautionsberechnung (BR-004):*
+
+[source]
+----
+rohbetrag  = round(0.20 × wiederbeschaffungswertEuro)   // kaufmännisch (HALF_UP)
+kautionEuro = clamp(rohbetrag, min=5, max=100)
+----
+
+Kaufmännisches Runden (HALF_UP): 0.5 wird aufgerundet. +
+Minimum: 5 EUR. Maximum: 100 EUR. +
+Beispiele: siehe Abschnitt „<<kautionsberechnung,Kautionsberechnungs-Spezifikation>>".
+
+*Verarbeitung — Initialisierung:*
+
+* `nutzungszaehler` wird auf `0` gesetzt.
+* `status` wird auf `VERFUEGBAR` gesetzt.
+
+*Response 201 Created:*
+
+[source,json]
+----
+{
+  "inventarnummer": "INV-042",
+  "kategorieId": "KAT-001",
+  "wiederbeschaffungswertEuro": 150,
+  "kautionEuro": 30,
+  "nutzungszaehler": 0,
+  "status": "VERFUEGBAR"
+}
+----
+
+*Fachliche Regeln:* BR-001, BR-002, BR-003, BR-004, BR-039, BR-041
+
+---
+
+===== GET /gegenstaende/{inventarnummer}
+
+Dieser Endpunkt ist in UC-07 (Verfügbarkeit abfragen und vormerken) vollständig spezifiziert.
+Er wird hier nur der Vollständigkeit wegen referenziert.
+
+---
+
+===== POST /mitglieder
+
+*Beschreibung:* Legt ein neues Mitglied an. +
+*Erforderliche Rolle:* `thekendienst`
+
+*Request Body:*
+
+[source,json]
+----
+{
+  "mitgliedId": "M-0042",
+  "name": "Sabine Müller"
+}
+----
+
+*Validierungen (in dieser Reihenfolge):*
+
+[cols="1,3,1,2", options="header"]
+|===
+|Nr. |Bedingung |HTTP-Status |Fehlermeldung
+
+|1
+|Rolle im Header `X-Rolle` ist nicht `thekendienst`
+|403 Forbidden
+|—
+
+|2
+|`mitgliedId` ist leer oder fehlt
+|400 Bad Request
+|„mitgliedId darf nicht leer sein"
+
+|3
+|`mitgliedId` existiert bereits
+|409 Conflict
+|„Mitglied bereits vorhanden"
+
+|4
+|`name` ist leer oder fehlt
+|400 Bad Request
+|„name darf nicht leer sein"
+|===
+
+*Response 201 Created:*
+
+[source,json]
+----
+{
+  "mitgliedId": "M-0042",
+  "name": "Sabine Müller"
+}
+----
+
+*Fachliche Regeln:* BR-005, BR-006, BR-039, BR-041
+
+---
+
+===== GET /mitglieder/{id}
+
+*Beschreibung:* Gibt Stamm- und Statusdaten eines Mitglieds zurück. +
+*Erforderliche Rolle:* `thekendienst`
+
+*Response 200 OK:*
+
+[source,json]
+----
+{
+  "mitgliedId": "M-0042",
+  "name": "Sabine Müller",
+  "gesperrt": false,
+  "aktiveLeihen": 2,
+  "einweisungen": ["KAT-001", "KAT-003"]
+}
+----
+
+`gesperrt` ist ein abgeleitetes Feld: `true`, wenn mindestens eine Ausleihe des Mitglieds
+überfällig ist (Rückgabefrist vor heutigem Datum, Gegenstand noch nicht zurückgegeben) — BR-034, BR-035. +
+`aktiveLeihen` zählt laufende Ausleihen (Status: ausgeliehen oder in Prüfung); Vormerkungen zählen nicht mit. +
+`einweisungen` enthält die Kategorie-IDs, für die eine Einweisung dokumentiert ist.
+
+*Fehlerfälle:*
+
+[cols="1,2", options="header"]
+|===
+|HTTP-Status |Bedingung
+
+|403 Forbidden
+|Rolle ist nicht `thekendienst`
+
+|404 Not Found
+|`id` existiert nicht
+|===
+
+*Fachliche Regeln:* BR-005, BR-034, BR-035, BR-039, BR-041
+
+[[kautionsberechnung]]
+==== Kautionsberechnungs-Spezifikation
+
+Die Kaution beträgt 20 % des Wiederbeschaffungswerts, kaufmännisch gerundet (HALF_UP) auf ganze Euro,
+mindestens 5 EUR und höchstens 100 EUR (BR-004).
+
+[cols="2,2,2,3", options="header"]
+|===
+|Wiederbeschaffungswert |20 % (roh) |Gerundet (HALF_UP) |Korrekte Kaution
+
+|10 EUR |2,00 EUR |2 EUR |5 EUR _(Minimum)_
+|25 EUR |5,00 EUR |5 EUR |5 EUR
+|26 EUR |5,20 EUR |5 EUR |5 EUR
+|27 EUR |5,40 EUR |5 EUR |5 EUR
+|28 EUR |5,60 EUR |6 EUR |6 EUR
+|100 EUR |20,00 EUR |20 EUR |20 EUR
+|500 EUR |100,00 EUR |100 EUR |100 EUR _(Maximum)_
+|600 EUR |120,00 EUR |120 EUR |100 EUR _(Maximum)_
+|===
+
+Der Schwellenwert zum Minimum liegt bei 25 EUR Wiederbeschaffungswert (5,00 EUR = Minimum).
+Der Schwellenwert zum Maximum liegt bei 500 EUR (100,00 EUR = Maximum).
+Zwischen diesen Grenzen gilt die kaufmännische Rundungsformel ohne Klammern.
+
+==== Akzeptanzkriterien
+
+[source,gherkin]
+----
+# UC-08 — Stammdaten verwalten
+# BR-001, BR-002, BR-003, BR-004, BR-005, BR-006, BR-039, BR-041
+
+Feature: Stammdaten verwalten (UC-08)
+
+  # ─── Kategorie anlegen ───────────────────────────────────────────────────────
+
+  Scenario: Kategorie anlegen – Happy Path
+    # BR-002, BR-039, BR-041
+    Given der Aufrufer trägt die Rolle "thekendienst" im Header X-Rolle
+    When POST /kategorien mit Body
+      """
+      {
+        "name": "Bohrmaschinen",
+        "leihdauerTage": 7,
+        "wartungsintervallAusleihen": 20,
+        "einweisungspflichtig": false
+      }
+      """
+    Then ist der HTTP-Statuscode 201
+    And die Antwort enthält eine kategorieId
+    And die Antwort enthält name "Bohrmaschinen", leihdauerTage 7,
+      wartungsintervallAusleihen 20, einweisungspflichtig false
+
+  Scenario: Kategorie anlegen – Duplikat
+    # BR-002, BR-039, BR-041
+    Given der Aufrufer trägt die Rolle "thekendienst" im Header X-Rolle
+    And die Kategorie "Bohrmaschinen" existiert bereits im System
+    When POST /kategorien mit Body
+      """
+      {
+        "name": "Bohrmaschinen",
+        "leihdauerTage": 14,
+        "wartungsintervallAusleihen": 10,
+        "einweisungspflichtig": true
+      }
+      """
+    Then ist der HTTP-Statuscode 409
+    And die Fehlermeldung lautet "Kategorie existiert bereits"
+
+  # ─── Gegenstand anlegen ──────────────────────────────────────────────────────
+
+  Scenario: Gegenstand anlegen – Happy Path inkl. Kautionsberechnung
+    # BR-001, BR-003, BR-004, BR-039, BR-041
+    Given der Aufrufer trägt die Rolle "thekendienst" im Header X-Rolle
+    And die Kategorie "KAT-001" existiert im System
+    When POST /gegenstaende mit Body
+      """
+      {
+        "inventarnummer": "INV-042",
+        "kategorieId": "KAT-001",
+        "wiederbeschaffungswertEuro": 150
+      }
+      """
+    Then ist der HTTP-Statuscode 201
+    And die Antwort enthält inventarnummer "INV-042"
+    And die Antwort enthält kautionEuro 30
+    And die Antwort enthält nutzungszaehler 0
+    And die Antwort enthält status "VERFUEGBAR"
+
+  Scenario: Gegenstand anlegen – Kategorie nicht gefunden
+    # BR-001, BR-039, BR-041
+    Given der Aufrufer trägt die Rolle "thekendienst" im Header X-Rolle
+    And keine Kategorie mit ID "KAT-UNBEKANNT" existiert im System
+    When POST /gegenstaende mit Body
+      """
+      {
+        "inventarnummer": "INV-099",
+        "kategorieId": "KAT-UNBEKANNT",
+        "wiederbeschaffungswertEuro": 80
+      }
+      """
+    Then ist der HTTP-Statuscode 404
+    And die Fehlermeldung lautet "Kategorie nicht gefunden"
+
+  Scenario: Gegenstand anlegen – Kaution Minimum bei 10 EUR Wiederbeschaffungswert
+    # BR-003, BR-004
+    Given der Aufrufer trägt die Rolle "thekendienst" im Header X-Rolle
+    And die Kategorie "KAT-001" existiert im System
+    When POST /gegenstaende mit Body
+      """
+      {
+        "inventarnummer": "INV-010",
+        "kategorieId": "KAT-001",
+        "wiederbeschaffungswertEuro": 10
+      }
+      """
+    Then ist der HTTP-Statuscode 201
+    And die Antwort enthält kautionEuro 5
+
+  Scenario: Gegenstand anlegen – Kaution Maximum bei 600 EUR Wiederbeschaffungswert
+    # BR-003, BR-004
+    Given der Aufrufer trägt die Rolle "thekendienst" im Header X-Rolle
+    And die Kategorie "KAT-001" existiert im System
+    When POST /gegenstaende mit Body
+      """
+      {
+        "inventarnummer": "INV-600",
+        "kategorieId": "KAT-001",
+        "wiederbeschaffungswertEuro": 600
+      }
+      """
+    Then ist der HTTP-Statuscode 201
+    And die Antwort enthält kautionEuro 100
+
+  # ─── Mitglied anlegen ────────────────────────────────────────────────────────
+
+  Scenario: Mitglied anlegen – Happy Path
+    # BR-005, BR-006, BR-039, BR-041
+    Given der Aufrufer trägt die Rolle "thekendienst" im Header X-Rolle
+    When POST /mitglieder mit Body
+      """
+      {
+        "mitgliedId": "M-0042",
+        "name": "Sabine Müller"
+      }
+      """
+    Then ist der HTTP-Statuscode 201
+    And die Antwort enthält mitgliedId "M-0042" und name "Sabine Müller"
+
+  Scenario: Mitglied anlegen – Duplikat
+    # BR-005, BR-006, BR-039, BR-041
+    Given der Aufrufer trägt die Rolle "thekendienst" im Header X-Rolle
+    And das Mitglied "M-0042" existiert bereits im System
+    When POST /mitglieder mit Body
+      """
+      {
+        "mitgliedId": "M-0042",
+        "name": "Anderer Name"
+      }
+      """
+    Then ist der HTTP-Statuscode 409
+    And die Fehlermeldung lautet "Mitglied bereits vorhanden"
+----
+
+==== Anforderungen (EARS-Syntax)
+
+[cols="1,1,5", options="header"]
+|===
+|ID |BR-Ref. |Anforderung (EARS)
+
+|EAR-08-01
+|BR-039, BR-041
+|When a request to `POST /kategorien`, `POST /gegenstaende`, or `POST /mitglieder` arrives with a header `X-Rolle` that is not `thekendienst`, the system shall respond with HTTP 403 Forbidden and leave all data unchanged.
+
+|EAR-08-02
+|BR-002
+|When `POST /kategorien` is called with a `name` that is identical (case-sensitive) to an existing category name, the system shall respond with HTTP 409 Conflict and the message „Kategorie existiert bereits".
+
+|EAR-08-03
+|BR-001
+|When `POST /gegenstaende` is called with a `kategorieId` that does not reference an existing category, the system shall respond with HTTP 404 Not Found without creating any record.
+
+|EAR-08-04
+|BR-003, BR-004
+|When `POST /gegenstaende` is called with a valid `wiederbeschaffungswertEuro`, the system shall compute `kautionEuro` as `clamp(round_half_up(0.20 × wiederbeschaffungswertEuro), 5, 100)` and store that computed value.
+
+|EAR-08-05
+|BR-001, BR-004
+|When `POST /gegenstaende` succeeds, the system shall initialise `nutzungszaehler` to `0` and `status` to `VERFUEGBAR`.
+
+|EAR-08-06
+|BR-005, BR-006
+|When `POST /mitglieder` is called with a `mitgliedId` that already exists, the system shall respond with HTTP 409 Conflict and the message „Mitglied bereits vorhanden", without modifying the existing record.
+
+|EAR-08-07
+|BR-034, BR-035
+|While at least one active loan of a member has a `rueckgabefrist` earlier than today's date and the item has not been returned, the system shall return `gesperrt: true` in `GET /mitglieder/{id}`.
+|===

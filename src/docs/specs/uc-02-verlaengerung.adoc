@@ -1,0 +1,306 @@
+:diagram-server-url: https://kroki.io/
+:diagram-server-type: kroki_io
+
+==== Persona Use Case
+
+[cols="1,3"]
+|===
+|Feld |Inhalt
+
+|Use-Case-ID
+|UC-02
+
+|Name
+|Ausleihe verlängern
+
+|Primary Actor
+|Karim (Thekendienst)
+
+|Stakeholders and Interests
+a|
+* *Mitglied* — möchte den Gegenstand länger nutzen, ohne eine neue Ausleihe anzulegen.
+* *Mitglieder in der Warteschlange* — haben ein Recht darauf, dass Verlängerungen nicht ihre Vormerkung entwerten.
+* *Verein* — will, dass Regeln einheitlich und nachvollziehbar durchgesetzt werden.
+
+|Trigger
+|Ein Mitglied beantragt eine Verlängerung seiner laufenden Ausleihe an der Theke.
+
+|Preconditions
+a|
+* Karim ist im System mit der Rolle `thekendienst` angemeldet.
+* Die Ausleihe existiert und hat den Status OFFEN.
+
+|Main Success Scenario
+a|
+1. Karim ruft die Ausleihe anhand ihrer ID ab.
+2. Das System prüft: Status OFFEN, noch nicht verlängert, nicht überfällig, keine offene Vormerkung für die Kategorie.
+3. Alle Prüfungen sind erfolgreich.
+4. Das System verlängert die Rückgabefrist um die volle Leihdauer der Kategorie und setzt das Merkmal `verlaengert = true`.
+5. Das System gibt die neue Rückgabefrist zurück.
+6. Karim teilt dem Mitglied die neue Frist mit.
+
+|Extensions
+a|
+*2a. Ausleihe nicht gefunden* +
+Das System antwortet mit 404. Karim prüft die ID und versucht es erneut oder bittet das Mitglied um den Beleg.
+
+*2b. Ausleihe bereits verlängert* (BR-012) +
+Das System antwortet mit 409 (`BEREITS_VERLAENGERT`). Eine zweite Verlängerung derselben Ausleihe ist nicht möglich. Karim informiert das Mitglied.
+
+*2c. Ausleihe überfällig* (BR-013) +
+Das System antwortet mit 409 (`AUSLEIHE_UEBERFAELLIG`). Karim fordert das Mitglied zur sofortigen Rückgabe auf.
+
+*2d. Offene Vormerkung für die Kategorie* (BR-013) +
+Das System antwortet mit 409 (`VORMERKUNG_VORHANDEN`). Karim informiert das Mitglied, dass jemand anderes auf den Gegenstand wartet.
+
+|Postconditions
+a|
+*Erfolg:* +
+Die Rückgabefrist ist um die volle Leihdauer der Kategorie verlängert. Das Merkmal `verlaengert` ist `true`. Eine weitere Verlängerung dieser Ausleihe ist ausgeschlossen.
+
+*Misserfolg:* +
+Die Ausleihe bleibt unverändert.
+
+|Business Rules
+|BR-012, BR-013, BR-039, BR-041
+|===
+
+==== Aktivitätsdiagramm
+
+[plantuml]
+----
+@startuml
+skinparam DefaultFontName Helvetica
+skinparam ArrowColor #444444
+skinparam ActivityBorderColor #444444
+skinparam ActivityBackgroundColor #F8F8F8
+skinparam ActivityDiamondBackgroundColor #FFFDE7
+
+start
+
+:Karim sendet POST /ausleihen/{id}/verlaengern\n(X-Rolle: thekendienst);
+
+if (Rolle = thekendienst?) then (nein)
+  :403 ROLLE_UNGUELTIG;
+  stop
+endif
+
+if (Ausleihe mit id existiert?) then (nein)
+  :404 AUSLEIHE_NICHT_GEFUNDEN;
+  stop
+endif
+
+if (Ausleihe.status = OFFEN?) then (nein)
+  :409 AUSLEIHE_NICHT_OFFEN;
+  stop
+endif
+
+if (Ausleihe.verlaengert = false?) then (nein)
+  :409 BEREITS_VERLAENGERT;
+  stop
+endif
+
+if (Ausleihe.rueckgabeFrist >= heute?) then (nein)
+  :409 AUSLEIHE_UEBERFAELLIG;
+  stop
+endif
+
+if (Keine offene Vormerkung\nfür Kategorie des Gegenstands?) then (nein)
+  :409 VORMERKUNG_VORHANDEN;
+  stop
+endif
+
+:Ausleihe.rueckgabeFrist\n+= Kategorie.leihdauerTage;
+:Ausleihe.verlaengert = true;
+
+:200 OK\n{ ausleiheId, neueFrist, verlaengert: true };
+
+stop
+@enduml
+----
+
+==== System Use Case: POST /ausleihen/{id}/verlaengern
+
+===== Request
+
+[cols="1,3"]
+|===
+|Feld |Wert
+
+|Method
+|POST
+
+|Path
+|`/ausleihen/{id}/verlaengern`
+
+|Header
+|`X-Rolle: thekendienst`
+
+|Body
+|leer
+|===
+
+===== Validierungen
+
+Die Prüfungen werden in dieser Reihenfolge ausgeführt. Die erste fehlgeschlagene Prüfung bricht den Vorgang ab.
+
+[cols="1,1,4"]
+|===
+|Schritt |Status |Bedingung
+
+|1
+|403
+|`X-Rolle` ≠ `thekendienst`
+
+|2
+|404
+|Keine Ausleihe mit `id` gefunden
+
+|3
+|409
+|`Ausleihe.status` ≠ `OFFEN`
+
+|4
+|409
+|`Ausleihe.verlaengert` = `true`
+
+|5
+|409
+|`Ausleihe.rueckgabeFrist` < heute (Ausleihe überfällig)
+
+|6
+|409
+|Mindestens eine Vormerkung mit Status OFFEN für die Kategorie des ausgeliehenen Gegenstands
+|===
+
+===== Verarbeitung (bei bestandenen Validierungen)
+
+. `Ausleihe.rueckgabeFrist` wird um `Kategorie.leihdauerTage` erhöht.
+. `Ausleihe.verlaengert` wird auf `true` gesetzt.
+
+===== Response 200 OK
+
+[source,json]
+----
+{
+  "ausleiheId": "string",
+  "neueFrist": "YYYY-MM-DD",
+  "verlaengert": true
+}
+----
+
+===== Fehlerantworten
+
+[cols="1,2,3"]
+|===
+|HTTP-Status |Code |Nachricht
+
+|403
+|`ROLLE_UNGUELTIG`
+|Zugriff verweigert: Rolle thekendienst erforderlich.
+
+|404
+|`AUSLEIHE_NICHT_GEFUNDEN`
+|Ausleihe nicht gefunden.
+
+|409
+|`AUSLEIHE_NICHT_OFFEN`
+|Verlängerung nicht möglich: Ausleihe ist nicht offen.
+
+|409
+|`BEREITS_VERLAENGERT`
+|Verlängerung nicht möglich: Diese Ausleihe wurde bereits verlängert.
+
+|409
+|`AUSLEIHE_UEBERFAELLIG`
+|Verlängerung nicht möglich: Ausleihe ist überfällig.
+
+|409
+|`VORMERKUNG_VORHANDEN`
+|Verlängerung nicht möglich: Kategorie ist vorgemerkt.
+|===
+
+==== Akzeptanzkriterien
+
+// BR-012: Verlängerung einmal je Ausleihe
+// BR-013: Ausschluss bei Überfälligkeit oder offener Vormerkung
+// BR-039: Rolle über X-Rolle Header
+// BR-041: thekendienst darf verlängern
+
+[source,gherkin]
+----
+# UC-02 — Ausleihe verlängern
+
+Feature: UC-02 Ausleihe verlängern
+
+  # BR-012, BR-041
+  Scenario: Happy Path – erste Verlängerung einer nicht überfälligen Ausleihe ohne Vormerkung
+    Given eine Ausleihe mit ID "AL-001", Status OFFEN, verlaengert = false,
+          Rückgabefrist in 3 Tagen und Kategorie mit Leihdauer 7 Tage
+    And keine offene Vormerkung für die Kategorie
+    When Karim POST /ausleihen/AL-001/verlaengern sendet mit X-Rolle: thekendienst
+    Then antwortet das System mit 200 OK
+    And die neueFrist ist Ausgangsfrist plus 7 Tage
+    And verlaengert = true
+
+  # BR-012
+  Scenario: Zweite Verlängerungsanfrage – Ausleihe bereits verlängert
+    Given eine Ausleihe mit ID "AL-002", Status OFFEN, verlaengert = true,
+          Rückgabefrist in 5 Tagen
+    And keine offene Vormerkung für die Kategorie
+    When Karim POST /ausleihen/AL-002/verlaengern sendet mit X-Rolle: thekendienst
+    Then antwortet das System mit 409
+    And der Fehlercode ist "BEREITS_VERLAENGERT"
+    And die Rückgabefrist der Ausleihe bleibt unverändert
+
+  # BR-013
+  Scenario: Verlängerung abgelehnt – Ausleihe ist überfällig
+    Given eine Ausleihe mit ID "AL-003", Status OFFEN, verlaengert = false,
+          Rückgabefrist gestern
+    When Karim POST /ausleihen/AL-003/verlaengern sendet mit X-Rolle: thekendienst
+    Then antwortet das System mit 409
+    And der Fehlercode ist "AUSLEIHE_UEBERFAELLIG"
+    And die Rückgabefrist der Ausleihe bleibt unverändert
+
+  # BR-013
+  Scenario: Verlängerung abgelehnt – Kategorie hat offene Vormerkung
+    Given eine Ausleihe mit ID "AL-004", Status OFFEN, verlaengert = false,
+          Rückgabefrist in 2 Tagen
+    And mindestens eine offene Vormerkung für die Kategorie des Gegenstands
+    When Karim POST /ausleihen/AL-004/verlaengern sendet mit X-Rolle: thekendienst
+    Then antwortet das System mit 409
+    And der Fehlercode ist "VORMERKUNG_VORHANDEN"
+    And die Rückgabefrist der Ausleihe bleibt unverändert
+
+  # BR-013 (Grenzfall: genau am Fälligkeitstag ist die Ausleihe noch nicht überfällig)
+  Scenario: Grenzfall – Ausleihe genau am Fälligkeitstag, Verlängerung noch möglich
+    Given eine Ausleihe mit ID "AL-005", Status OFFEN, verlaengert = false,
+          Rückgabefrist = heute und Kategorie mit Leihdauer 7 Tage
+    And keine offene Vormerkung für die Kategorie
+    When Karim POST /ausleihen/AL-005/verlaengern sendet mit X-Rolle: thekendienst
+    Then antwortet das System mit 200 OK
+    And die neueFrist ist heute plus 7 Tage
+    And verlaengert = true
+----
+
+==== Anforderungen (EARS-Syntax)
+
+[cols="1,4"]
+|===
+|ID |Anforderung
+
+|UC-02-REQ-01
+|*When* ein Thekendienst-Nutzer eine Verlängerung beantragt und alle Prüfungen bestanden sind, *shall* das System die Rückgabefrist um exakt die Leihdauer der Kategorie des Gegenstands in ganzen Tagen erhöhen. (BR-012)
+
+|UC-02-REQ-02
+|*If* die Ausleihe das Merkmal `verlaengert = true` trägt, *then* *shall* das System die Verlängerung mit dem Fehlercode `BEREITS_VERLAENGERT` ablehnen und die Ausleihe unverändert lassen. (BR-012)
+
+|UC-02-REQ-03
+|*If* das aktuelle Datum nach der Rückgabefrist der Ausleihe liegt, *then* *shall* das System die Verlängerung mit dem Fehlercode `AUSLEIHE_UEBERFAELLIG` ablehnen, unabhängig davon, ob die Ausleihe bereits verlängert wurde. (BR-013)
+
+|UC-02-REQ-04
+|*If* für die Kategorie des ausgeliehenen Gegenstands mindestens eine Vormerkung mit Status OFFEN existiert, *then* *shall* das System die Verlängerung mit dem Fehlercode `VORMERKUNG_VORHANDEN` ablehnen. (BR-013)
+
+|UC-02-REQ-05
+|*When* der HTTP-Header `X-Rolle` einen anderen Wert als `thekendienst` enthält oder fehlt, *shall* das System die Anfrage mit HTTP 403 ablehnen, ohne weitere Prüfungen durchzuführen. (BR-039, BR-041)
+|===
