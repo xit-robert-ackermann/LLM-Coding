@@ -1,0 +1,56 @@
+= Issue 0003: Drizzle-Schema + SQLite-Migration
+
+:issue-id: 0003
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-08, BR-001, BR-002, BR-003, BR-004, BR-005
+:epic: 0001
+
+== Beschreibung
+
+Als Entwickler möchte ich ein versioniertes Datenbankschema, das alle Domänenobjekte des Leihgut-Systems abbildet, damit Ausleihen, Mitglieder, Gegenstände und alle weiteren Entitäten persistiert werden können.
+
+Technisch werden mit Drizzle ORM die Tabellen für alle 9 Entitäten aus `src/docs/specs/entity-model.adoc` definiert:
+`Gegenstand`, `Kategorie`, `Ausleihe`, `Mitglied`, `Einweisung`, `Vormerkung`, `Reservierung`, `Pruefprotokoll` sowie `AuditEintrag` (deckt Kautionsbewegungen und Zustandswechsel ab).
+Das Schema liegt unter `src/db/schema.ts`; Migrationen werden mit `drizzle-kit generate` erzeugt und beim Serverstart automatisch durch `drizzle-orm/better-sqlite3`-Migrate angewendet.
+Der `DatabaseModule` stellt den Drizzle-Client als NestJS-Provider bereit (IOSP: reines Infrastruktur-Modul, keine Domänenlogik).
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Drizzle-Schema und SQLite-Migration
+
+  Scenario: Alle Tabellen werden beim ersten Start angelegt
+    Given keine SQLite-Datei existiert am konfigurierten Pfad
+    When der Server mit `npm run start:dev` gestartet wird
+    Then existiert die SQLite-Datei
+    And die Tabellen `gegenstand`, `kategorie`, `ausleihe`, `mitglied`,
+        `einweisung`, `vormerkung`, `reservierung`, `pruefprotokoll`
+        und `audit_eintrag` sind vorhanden
+    And jede Tabelle enthält die im Schema definierten Spalten
+
+  Scenario: Drizzle Studio zeigt korrektes Schema
+    Given der Server wurde mindestens einmal gestartet
+    When Drizzle Studio gegen die SQLite-Datei geöffnet wird
+    Then sind alle 9 Tabellen mit ihren Spalten, Typen und
+        Fremdschlüsselbeziehungen sichtbar
+
+  Scenario: Zweiter Serverstart bricht nicht ab (idempotente Migration)
+    Given die SQLite-Datei mit allen Tabellen existiert bereits
+    And die Tabellen enthalten Testdaten
+    When der Server erneut mit `npm run start:dev` gestartet wird
+    Then endet der Start ohne Fehler
+    And die vorhandenen Testdaten sind unverändert
+
+  Scenario: Ungültige Datenbankdatei wird gemeldet
+    Given am konfigurierten Pfad liegt eine beschädigte Nicht-SQLite-Datei
+    When der Server gestartet wird
+    Then bricht der Start mit einer verständlichen Fehlermeldung ab
+    And der Exit-Code ist ungleich 0
+----
+
+== Abhängigkeiten
+
+- 0002 (NestJS-Bootstrap + Health-Endpunkt)

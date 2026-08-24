@@ -1,0 +1,53 @@
+= Issue 0004: DateSource-Interface + Implementierungen
+
+:issue-id: 0004
+:type: Story
+:status: open
+:priority: Must
+:refs: BR-039, UC-09
+:epic: 0001
+
+== Beschreibung
+
+Als Entwickler möchte ich ein austauschbares Datumsquelle-Interface, damit Fristen und Datumsvergleiche in Tests deterministisch geprüft werden können, ohne von der Systemuhr abhängig zu sein.
+
+Technisch definiert das Interface `DateSource` eine einzige Methode `today(): Date`.
+Es gibt zwei Implementierungen: `SystemDateSource` delegiert an `new Date()` und liefert damit immer das aktuelle Systemdatum; `FixedDateSource` nimmt ein `Date`-Objekt im Konstruktor entgegen und gibt es bei jedem Aufruf unverändert zurück.
+Der NestJS-Provider wird unter dem Injection-Token `DATE_SOURCE` registriert; im Produktivbetrieb wird `SystemDateSource` gebunden, in Tests kann `FixedDateSource` injiziert werden.
+Beide Klassen sind reine Operations (IOSP): keine Seiteneffekte außer dem Lesen der Systemuhr.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: DateSource-Interface und Implementierungen
+
+  Scenario: SystemDateSource gibt heutiges Datum zurück
+    Given eine Instanz von `SystemDateSource`
+    When `today()` aufgerufen wird
+    Then liegt das zurückgegebene Datum innerhalb von ±1 Tag
+        des tatsächlichen Systemdatums zum Zeitpunkt des Aufrufs
+
+  Scenario: FixedDateSource gibt immer das konfigurierte Datum zurück
+    Given eine Instanz von `FixedDateSource` mit dem Datum 2024-03-15
+    When `today()` zum ersten Mal aufgerufen wird
+    Then ist das zurückgegebene Datum exakt 2024-03-15
+    When `today()` erneut aufgerufen wird, nachdem die Systemzeit fortgeschritten ist
+    Then ist das zurückgegebene Datum weiterhin 2024-03-15
+
+  Scenario: Beide Klassen implementieren das DateSource-Interface
+    Given die TypeScript-Quelldateien von `SystemDateSource` und `FixedDateSource`
+    When `npm run build` ausgeführt wird
+    Then bricht der Compiler nicht ab
+    And es werden keine Typ-Fehler bezüglich `DateSource` gemeldet
+
+  Scenario: DateSource ist per Injection-Token injizierbar
+    Given ein NestJS-Testmodul, das `SystemDateSource` unter `DATE_SOURCE` registriert
+    When ein Service, der `@Inject(DATE_SOURCE)` verwendet, instanziiert wird
+    Then erhält der Service eine gültige `DateSource`-Instanz
+    And `today()` auf dieser Instanz wirft keine Exception
+----
+
+== Abhängigkeiten
+
+- 0002 (NestJS-Bootstrap + Health-Endpunkt)

@@ -1,0 +1,54 @@
+= Issue 0002: NestJS-Bootstrap + Health-Endpunkt
+
+:issue-id: 0002
+:type: Story
+:status: open
+:priority: Must
+:epic: 0001
+
+== Beschreibung
+
+Als Entwickler möchte ich ein lauffähiges NestJS-Projekt mit einem `GET /health`-Endpunkt, der HTTP 200 zurückgibt, damit alle weiteren Stories eine funktionierende, verifizierbare Basis haben.
+
+Technisch wird das NestJS-Projekt mit Express-Adapter aufgesetzt.
+`AppModule` ist das Wurzelmodul; `HealthController` implementiert den einzigen Route-Handler `GET /health`.
+`main.ts` startet die Applikation auf dem konfigurierten Port (Standard: 3000).
+`package.json` enthält die Scripts `start:dev` (ts-node / nest start --watch), `build` (tsc / nest build) und `test` (jest).
+Der Endpunkt ist eine reine Integration (IOSP): er ruft keinen Domänencode auf, gibt direkt `{"status":"ok"}` zurück.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: NestJS-Bootstrap und Health-Endpunkt
+
+  Scenario: Health-Endpunkt liefert 200 OK
+    Given der Server läuft auf Port 3000
+    When ein HTTP-GET auf `http://localhost:3000/health` abgesetzt wird
+    Then antwortet der Server mit HTTP-Status 200
+    And der Response-Header `Content-Type` enthält `application/json`
+    And der Response-Body ist exakt `{"status":"ok"}`
+
+  Scenario: Build schlägt nicht fehl
+    Given das Projekt ist ausgecheckt und Abhängigkeiten sind installiert
+    When `npm run build` ausgeführt wird
+    Then endet der Befehl mit Exit-Code 0
+    And das Verzeichnis `dist/` wurde erzeugt
+
+  Scenario: Test-Runner läuft durch
+    Given das Projekt ist ausgecheckt und Abhängigkeiten sind installiert
+    When `npm run test` ausgeführt wird
+    Then endet der Befehl mit Exit-Code 0
+    And die Ausgabe enthält keine unbehandelten Fehler
+    And mindestens 0 Test-Suites wurden ausgeführt (leere Suite ist erlaubt)
+
+  Scenario: Server startet auf konfigurierbarem Port
+    Given die Umgebungsvariable `PORT` ist auf 4000 gesetzt
+    When der Server mit `npm run start:dev` gestartet wird
+    Then lauscht der Server auf Port 4000
+    And `GET /health` auf Port 4000 liefert HTTP 200
+----
+
+== Abhängigkeiten
+
+_Keine — diese Story ist die Basis aller weiteren Stories in Epic 0001._

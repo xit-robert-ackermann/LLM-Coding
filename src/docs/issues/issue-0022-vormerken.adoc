@@ -1,0 +1,77 @@
+= Issue 0022: Vormerken (POST /vormerkungen)
+
+:issue-id: 0022
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-07, BR-026, BR-027, BR-028, BR-033
+:epic: 0021
+
+== Beschreibung
+
+Als Mitglied möchte ich einen Gegenstand einer Kategorie vormerken,
+damit ich automatisch eine Reservierung erhalte, sobald ein Gegenstand dieser Kategorie verfügbar wird.
+
+=== Technischer Kontext
+
+Endpunkt: `POST /vormerkungen`
+Erlaubte Rollen: `mitglied`, `thekendienst`
+Request-Body: `{ mitgliedId: string, kategorieId: string }`
+Erfolgs-Response: `201 Created`
+
+Der Endpunkt delegiert an `VormerkungController.create()`, welcher `VormerkungService.vormerken()` aufruft.
+
+Der Service prüft in dieser Reihenfolge:
+
+1. Die Kategorie muss existieren (sonst 404).
+2. Das Mitglied darf keine aktive Vormerkung für dieselbe Kategorie haben (sonst 409 `VORMERKUNG_BEREITS_VORHANDEN`).
+3. Gesperrte Mitglieder dürfen vormerken (BR-033) — keine Sperrprüfung beim Anlegen.
+4. Eine Vormerkung gilt für die gesamte Kategorie, nicht für einen einzelnen Gegenstand (BR-027).
+5. Die Vormerkung wird mit dem aktuellen Zeitstempel als Eingangszeit gespeichert (FIFO-Grundlage, BR-028).
+
+Vor dem Anlegen der Vormerkung werden verfallene Reservierungen der betroffenen Kategorie on-demand bereinigt
+(Aufruf von `VormerkungService.verfalleneReservierungenBereinigen(kategorieId)`).
+
+BR-026 (WARTUNGSFAELLIG → nicht reservieren) gilt beim _Reservierungsanlegen_ (UC-09, Issue 0024),
+nicht beim Vormerken selbst — die Vormerkung wird auch dann zugelassen, wenn alle Gegenstände der Kategorie
+aktuell wartungsfällig sind.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Vormerken
+
+  Scenario: Gültiges Mitglied merkt eine Kategorie vor
+    Given ein aktives, nicht gesperrtes Mitglied mit Id "M001"
+    And eine Kategorie mit Id "K001" existiert
+    And das Mitglied hat keine Vormerkung für "K001"
+    When POST /vormerkungen mit { mitgliedId: "M001", kategorieId: "K001" } aufgerufen wird
+    Then lautet der HTTP-Status 201
+    And eine Vormerkung für M001/K001 ist in der Datenbank vorhanden
+    And die Eingangszeit der Vormerkung ist der aktuelle Zeitstempel
+
+  Scenario: Gesperrtes Mitglied darf vormerken
+    Given ein Mitglied mit Id "M002" hat eine überfällige Ausleihe (Sperre aktiv, BR-034)
+    And eine Kategorie mit Id "K001" existiert
+    And das Mitglied hat keine Vormerkung für "K001"
+    When POST /vormerkungen mit { mitgliedId: "M002", kategorieId: "K001" } aufgerufen wird
+    Then lautet der HTTP-Status 201
+    And die Vormerkung ist angelegt
+
+  Scenario: Doppelte Vormerkung desselben Mitglieds für dieselbe Kategorie wird abgelehnt
+    Given ein Mitglied mit Id "M001" hat bereits eine Vormerkung für Kategorie "K001"
+    When POST /vormerkungen mit { mitgliedId: "M001", kategorieId: "K001" } erneut aufgerufen wird
+    Then lautet der HTTP-Status 409
+    And der Fehlercode lautet "VORMERKUNG_BEREITS_VORHANDEN"
+
+  Scenario: Unbekannte Kategorie
+    Given keine Kategorie mit Id "K999" existiert
+    When POST /vormerkungen mit { mitgliedId: "M001", kategorieId: "K999" } aufgerufen wird
+    Then lautet der HTTP-Status 404
+    And der Fehlercode lautet "KATEGORIE_NICHT_GEFUNDEN"
+----
+
+== Abhängigkeiten
+
+* 0021 (EPIC: Vormerkung und Reservierung)

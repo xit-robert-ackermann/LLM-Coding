@@ -1,0 +1,76 @@
+= Issue 0023: Vormerkung stornieren (DELETE /vormerkungen/:id)
+
+:issue-id: 0023
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-07, BR-027
+:epic: 0021
+
+== Beschreibung
+
+Als Mitglied möchte ich meine Vormerkung stornieren,
+damit ich meinen Platz in der Warteschlange freigebe und der Gegenstand anderen Mitgliedern zur Verfügung steht.
+
+=== Technischer Kontext
+
+Endpunkt: `DELETE /vormerkungen/:id`
+Erlaubte Rollen: `mitglied`, `thekendienst`
+Erfolgs-Response: `204 No Content`
+
+Der Endpunkt delegiert an `VormerkungService.stornieren(vormerkungId)`.
+
+Der Service prüft und führt aus:
+
+1. Die Vormerkung mit der angegebenen Id muss existieren (sonst 404 `VORMERKUNG_NICHT_GEFUNDEN`).
+2. Hat die Vormerkung bereits zu einer Reservierung geführt (GegenstandStatus = RESERVIERT für dieses Mitglied)?
+   * Ja → die Reservierung wird aufgehoben: GegenstandStatus wird auf `VERFUEGBAR` zurückgesetzt.
+     Anschließend wird `reservierungAnlegen(gegenstandId)` aufgerufen, um das nächste Mitglied
+     in der Warteschlange zu bedienen (Kaskade).
+   * Nein → die Vormerkung wird ohne weitere Konsequenzen gelöscht.
+3. Die Vormerkung wird aus der Queue entfernt; die verbleibenden Plätze rücken entsprechend vor.
+
+Die Stornierung durch den Thekendienst ist zulässig, z. B. wenn das Mitglied nicht erreichbar ist.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Vormerkung stornieren
+
+  Scenario: Mitglied storniert eine offene Vormerkung (noch keine Reservierung)
+    Given ein Mitglied mit Id "M001" hat eine Vormerkung mit Id "V001" für Kategorie "K001"
+    And die Vormerkung hat noch keine Reservierung ausgelöst
+    When DELETE /vormerkungen/V001 aufgerufen wird
+    Then lautet der HTTP-Status 204
+    And die Vormerkung V001 existiert nicht mehr in der Datenbank
+    And die Positionen der verbleibenden Vormerkungen in der Queue rücken entsprechend vor
+
+  Scenario: Mitglied storniert eine bereits reservierte Vormerkung — nächstes Mitglied erbt
+    Given ein Mitglied M001 hat eine Vormerkung V001, die eine Reservierung für Gegenstand G001 ausgelöst hat
+    And GegenstandStatus von G001 ist RESERVIERT
+    And ein zweites Mitglied M002 steht als nächstes in der Warteschlange für Kategorie "K001"
+    When DELETE /vormerkungen/V001 aufgerufen wird
+    Then lautet der HTTP-Status 204
+    And die Reservierung für M001 ist aufgehoben
+    And GegenstandStatus von G001 ist RESERVIERT (nun für M002)
+    And eine neue Vormerkung/Reservierung für M002 wurde on-demand angelegt
+
+  Scenario: Mitglied storniert eine reservierte Vormerkung — keine weitere Vormerkung vorhanden
+    Given ein Mitglied M001 hat eine Vormerkung V001 mit Reservierung für Gegenstand G001
+    And keine weiteren Vormerkungen für Kategorie "K001" existieren
+    When DELETE /vormerkungen/V001 aufgerufen wird
+    Then lautet der HTTP-Status 204
+    And GegenstandStatus von G001 ist VERFUEGBAR
+
+  Scenario: Unbekannte VormerkungId
+    Given keine Vormerkung mit Id "V999" existiert
+    When DELETE /vormerkungen/V999 aufgerufen wird
+    Then lautet der HTTP-Status 404
+    And der Fehlercode lautet "VORMERKUNG_NICHT_GEFUNDEN"
+----
+
+== Abhängigkeiten
+
+* 0021 (EPIC: Vormerkung und Reservierung)
+* 0022 (Vormerken — Anlegen der Warteschlange)

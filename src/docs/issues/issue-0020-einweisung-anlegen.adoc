@@ -1,0 +1,78 @@
+= Issue 0020: Einweisung anlegen
+
+:issue-id: 0020
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-06, BR-037, BR-038
+:epic: 0017
+
+== Beschreibung
+
+Als Wart möchte ich eine Einweisung für ein Mitglied in einer bestimmten Gerätekategorie anlegen,
+damit das Mitglied einweisungspflichtige Gegenstände dieser Kategorie ausleihen kann.
+
+Der CLI-Befehl lautet:
+
+  leihgut einweise <mitgliedId> <kategorieId>
+
+Einweisungen dürfen ausschließlich vom Wart über die CLI angelegt werden (BR-037).
+Der Thekendienst prüft das Vorhandensein einer Einweisung beim Ausleihvorgang, legt sie aber nicht
+selbst an (BR-038).
+Eine Einweisung gilt für genau eine Person und eine Kategorie und ist dauerhaft gespeichert.
+
+=== Technischer Kontext
+
+Zu implementieren ist `EinweisungCommand` (nestjs-commander), der `EinweisungService.einweisungAnlegen()` aufruft.
+
+Der Service führt folgende Schritte aus:
+
+. Mitglied anhand der `mitgliedId` laden — nicht gefunden → Fehler.
+. Kategorie anhand der `kategorieId` laden — nicht gefunden → Fehler.
+. Prüfen, ob für diese Person-Kategorie-Kombination bereits eine Einweisung existiert (Duplikatschutz).
+  Falls ja: keine Aktion, kein Fehler (idempotentes Verhalten).
+. Neue Einweisung mit aktuellem Datum anlegen und persistieren.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Einweisung anlegen
+
+  Scenario: Einweisung erfolgreich anlegen
+    Given ein Mitglied mit gültiger mitgliedId
+    And eine Kategorie mit gültiger kategorieId
+    And für diese Kombination liegt noch keine Einweisung vor
+    When der Wart `leihgut einweise <mitgliedId> <kategorieId>` ausführt
+    Then wird eine Einweisung mit dem aktuellen Datum angelegt
+    And die Einweisung ist dauerhaft gespeichert
+
+  Scenario: Unbekannte Mitglieds-ID
+    Given eine mitgliedId, die keinem Mitglied entspricht
+    When der Wart `leihgut einweise <mitgliedId> <kategorieId>` ausführt
+    Then gibt die CLI einen Fehler aus: "Mitglied nicht gefunden"
+    And es wird keine Einweisung angelegt
+
+  Scenario: Unbekannte Kategorie-ID
+    Given eine kategorieId, die keiner Kategorie entspricht
+    When der Wart `leihgut einweise <mitgliedId> <kategorieId>` ausführt
+    Then gibt die CLI einen Fehler aus: "Kategorie nicht gefunden"
+    And es wird keine Einweisung angelegt
+
+  Scenario: Einweisung existiert bereits (Idempotenz)
+    Given ein Mitglied und eine Kategorie
+    And für diese Kombination liegt bereits eine Einweisung vor
+    When der Wart `leihgut einweise <mitgliedId> <kategorieId>` erneut ausführt
+    Then gibt die CLI eine Bestätigung aus, ohne einen Fehler zu werfen
+    And es wird kein Duplikat angelegt
+
+  Scenario: Mitglied kann einweisungspflichtige Gegenstände ausleihen
+    Given ein Mitglied mit einer gültigen Einweisung für Kategorie K
+    And ein einweisungspflichtiger Gegenstand der Kategorie K ist verfügbar
+    When das Mitglied diesen Gegenstand ausleihen möchte
+    Then wird die Ausleihe nicht wegen fehlender Einweisung abgelehnt
+----
+
+== Abhängigkeiten
+
+* 0017 — EPIC Prüfung, Wartung und Einweisung

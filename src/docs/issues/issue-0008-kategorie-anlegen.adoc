@@ -1,0 +1,68 @@
+= Issue 0008: Kategorie anlegen
+
+:issue-id: 0008
+:type: Story
+:status: open
+:priority: Must
+:refs: UC-08, BR-001, BR-002
+:epic: 0007
+
+== Beschreibung
+
+Als Thekendienst möchte ich eine neue Leihkategorie anlegen, damit Gegenstände dieser Kategorie zugeordnet werden können und die kategoriespezifischen Regeln (Leihdauer, Wartungsintervall, Einweisungspflicht) im System hinterlegt sind.
+
+*Technischer Kontext:*
+
+Eingehende Anfragen an `POST /kategorien` werden vom `KategorieController.create()` entgegengenommen.
+Dieser delegiert an `KatalogService.kategorieAnlegen()`, das die Geschäftsregeln prüft und die Kategorie über `IGegenstandRepository.kategorieAnlegen()` persistiert.
+
+Validierungsregeln (BR-002):
+
+- `name` — Pflichtfeld, non-empty String
+- `leihdauerTage` — Pflichtfeld, ganzzahlig, Mindestwert 1
+- `wartungsintervall` — Pflichtfeld, ganzzahlig, Mindestwert 1
+- `einweisungspflicht` — Pflichtfeld, Boolean
+
+Das System vergibt die Kategorie-ID automatisch.
+Die angelegte Kategorie wird vollständig (inkl. ID) in der Antwort zurückgegeben.
+
+== Akzeptanzkriterien
+
+[source,gherkin]
+----
+Feature: Kategorie anlegen
+
+  Scenario: Kategorie erfolgreich anlegen
+    Given der Thekendienst ist authentifiziert
+    When er POST /kategorien aufruft mit
+      """
+      {
+        "name": "Werkzeug",
+        "leihdauerTage": 7,
+        "wartungsintervall": 10,
+        "einweisungspflicht": false
+      }
+      """
+    Then antwortet das System mit HTTP 201
+    And die Antwort enthält eine systemvergebene id
+    And die Antwort enthält alle übermittelten Felder unverändert
+
+  Scenario: Pflichtfeld fehlt
+    Given der Thekendienst ist authentifiziert
+    When er POST /kategorien aufruft ohne das Feld "name"
+    Then antwortet das System mit HTTP 422
+
+  Scenario: Leihdauer ist 0
+    Given der Thekendienst ist authentifiziert
+    When er POST /kategorien aufruft mit leihdauerTage 0
+    Then antwortet das System mit HTTP 422
+
+  Scenario: Wartungsintervall ist 0
+    Given der Thekendienst ist authentifiziert
+    When er POST /kategorien aufruft mit wartungsintervall 0
+    Then antwortet das System mit HTTP 422
+----
+
+== Abhängigkeiten
+
+- 0007 (EPIC Stammdatenverwaltung)
