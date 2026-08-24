@@ -2,7 +2,7 @@
 
 :issue-id: 0005
 :type: Story
-:status: open
+:status: closed
 :priority: Must
 :refs: BR-039, BR-040, BR-041, BR-042
 :epic: 0001

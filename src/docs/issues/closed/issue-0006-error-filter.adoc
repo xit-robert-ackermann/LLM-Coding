@@ -2,7 +2,7 @@
 
 :issue-id: 0006
 :type: Story
-:status: open
+:status: closed
 :priority: Must
 :refs: interface-contracts.adoc (Fehlerkatalog)
 :epic: 0001
