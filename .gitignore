@@ -12,3 +12,6 @@ __pycache__/
 
 # docToolchain build output
 build/
+
+dist/
+node_modules
