@@ -19,6 +19,12 @@ export class GegenstandController {
     return this.service.gegenstaendeAbfragen({ kategorieId, status });
   }
 
+  @Get(':inventarnummer/zustandswechsel')
+  @RequireRole('thekendienst', 'wart')
+  findZustandswechsel(@Param('inventarnummer') inventarnummer: string) {
+    return this.service.zustandswechselAbfragen(inventarnummer);
+  }
+
   @Get(':inventarnummer')
   @RequireRole('mitglied', 'thekendienst', 'wart')
   findOne(@Param('inventarnummer') inventarnummer: string) {

@@ -112,6 +112,16 @@ export class KatalogService {
     };
   }
 
+  zustandswechselAbfragen(inventarnummer: string): any[] {
+    const g = this.db.select().from(schema.gegenstand)
+      .where(eq(schema.gegenstand.inventarnummer, inventarnummer)).get();
+    if (!g) throw new GegenstandNichtGefundenError(inventarnummer);
+    return this.db.select().from(schema.zustandswechsel)
+      .where(eq(schema.zustandswechsel.gegenstandId, inventarnummer))
+      .all()
+      .map(z => ({ id: z.id, vonStatus: z.vonStatus, nachStatus: z.nachStatus, grund: z.grund, zeitstempel: z.zeitstempel }));
+  }
+
   mitgliedAnlegen(input: { name: string }): MitgliedDto {
     if (!input.name?.trim()) throw new EingabeUngueltigError('name ist Pflichtfeld und darf nicht leer sein.');
     const id = crypto.randomUUID();

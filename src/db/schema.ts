@@ -73,3 +73,12 @@ export const einweisung = sqliteTable('einweisung', {
   kategorieId: text('kategorie_id').notNull().references(() => kategorie.id),
   dokumentiertAm: text('dokumentiert_am').notNull(),
 });
+
+export const zustandswechsel = sqliteTable('zustandswechsel', {
+  id: text('id').primaryKey(),
+  gegenstandId: text('gegenstand_id').notNull().references(() => gegenstand.inventarnummer),
+  vonStatus: text('von_status').notNull(),
+  nachStatus: text('nach_status').notNull(),
+  grund: text('grund').notNull(),
+  zeitstempel: text('zeitstempel').notNull(),
+});

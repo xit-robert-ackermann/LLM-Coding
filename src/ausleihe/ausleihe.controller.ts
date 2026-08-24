@@ -32,6 +32,18 @@ export class AusleiheController {
     });
   }
 
+  @Get(':id/kautionsbewegungen')
+  @RequireRole('thekendienst', 'wart')
+  findKautionsbewegungen(@Param('id') id: string) {
+    return this.service.kautionsbewegungenAbfragen(id);
+  }
+
+  @Get(':id')
+  @RequireRole('thekendienst', 'wart')
+  findOne(@Param('id') id: string) {
+    return this.service.ausleiheDetail(id);
+  }
+
   @Post(':id/verlaengern')
   @HttpCode(HttpStatus.OK)
   @RequireRole('thekendienst')

@@ -2,7 +2,7 @@
 
 :issue-id: 0025
 :type: EPIC
-:status: open
+:status: closed
 :priority: Must
 :refs: UC-10
 

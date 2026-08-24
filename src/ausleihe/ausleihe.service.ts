@@ -234,4 +234,40 @@ export class AusleiheService {
         status: a.status,
       }));
   }
+
+  ausleiheDetail(id: string): AusleiheDto {
+    const a = this.db.select().from(schema.ausleihe).where(eq(schema.ausleihe.id, id)).get();
+    if (!a) throw new AusleiheNichtGefundenError(id);
+    return { ...a, verlaengert: Boolean(a.verlaengert) };
+  }
+
+  kautionsbewegungenAbfragen(ausleiheId: string): any[] {
+    const a = this.db.select().from(schema.ausleihe).where(eq(schema.ausleihe.id, ausleiheId)).get();
+    if (!a) throw new AusleiheNichtGefundenError(ausleiheId);
+    return this.db.select().from(schema.kautionsbewegung)
+      .where(eq(schema.kautionsbewegung.ausleiheId, ausleiheId))
+      .all()
+      .map(k => ({ id: k.id, typ: k.typ, betragEuro: k.betragEuro, zeitstempel: k.zeitstempel }));
+  }
+
+  pruefungsarbeitsliste(): AusleiheDto[] {
+    const gegenstaendeInPruefung = this.db.select({ inventarnummer: schema.gegenstand.inventarnummer })
+      .from(schema.gegenstand)
+      .where(eq(schema.gegenstand.status, 'IN_PRUEFUNG'))
+      .all()
+      .map(g => g.inventarnummer);
+
+    if (gegenstaendeInPruefung.length === 0) return [];
+
+    return this.db.select().from(schema.ausleihe)
+      .where(eq(schema.ausleihe.status, 'OFFEN'))
+      .all()
+      .filter(a => gegenstaendeInPruefung.includes(a.gegenstandId))
+      .map(a => ({
+        id: a.id, gegenstandId: a.gegenstandId, mitgliedId: a.mitgliedId,
+        ausgabeDatum: a.ausgabeDatum, rueckgabeFrist: a.rueckgabeFrist,
+        verlaengert: Boolean(a.verlaengert), auffaelligkeiten: a.auffaelligkeiten,
+        status: a.status,
+      }));
+  }
 }
