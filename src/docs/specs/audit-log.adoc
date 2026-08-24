@@ -1,0 +1,533 @@
+== Audit-Log-Spezifikation
+
+Das Audit-Log protokolliert lückenlos alle sicherheitskritischen und finanziell relevanten Vorgänge.
+Es dient dem Qualitätsziel _Nachvollziehbarkeit_ aus dem PRD und erfüllt BR-022.
+
+Das Log besteht aus zwei unabhängig persistierten Eintragstypen:
+*Kautionsbewegungen* (bereits im Entity-Modell als `Kautionsbewegung` definiert) und
+*Zustandswechsel von Gegenständen* (neu, ergänzt das Entity-Modell).
+
+Beide Typen sind unveränderlich (append-only): Ein einmal geschriebener Eintrag wird nie geändert oder gelöscht.
+
+---
+
+=== Was wird geloggt?
+
+==== A) Kautionsbewegungen
+
+Jede Kautionsbewegung eines der drei Typen `HINTERLEGUNG`, `ABZUG` oder `FREIGABE` erzeugt
+einen persistierten Eintrag (BR-022).
+Die Entität `Kautionsbewegung` ist im Entity-Modell vollständig definiert; die REST-Darstellung
+ergänzt das abgeleitete Feld `mitgliedId` und macht `pruefprotokollId` aus `ausloeserId` explizit.
+
+==== B) Zustandswechsel von Gegenständen
+
+Jeder Wechsel von `Gegenstand.status` wird als eigener Eintrag protokolliert.
+Dieses Konzept ist im Entity-Modell noch nicht als eigene Entität vorhanden; diese Spezifikation
+führt es ein.
+
+Felder: `inventarnummer`, `vonStatus`, `nachStatus`, `zeitstempel`, `ausleiheId` (nullable),
+`ausloeserId` (Ausleihe-ID, Pruefprotokoll-ID oder `"system"`), `ausloeserRolle`.
+
+---
+
+=== Schema: KautionsbewegungEintrag (REST-Repräsentation)
+
+Die JSON-Darstellung der `Kautionsbewegung` für Audit-Abfragen — deckungsgleich mit dem
+Entity-Modell, ergänzt um `mitgliedId` und das explizite Feld `pruefprotokollId`:
+
+[source,json]
+----
+{
+  "id":               "string",
+  "zeitstempel":      "ISO-8601 datetime",
+  "typ":              "HINTERLEGUNG | ABZUG | FREIGABE",
+  "betragEuro":       25,
+  "ausleiheId":       "string",
+  "pruefprotokollId": "string | null",
+  "mitgliedId":       "string"
+}
+----
+
+[cols="2,2,5"]
+|===
+|Feld |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Systemgenerierter Bezeichner.
+
+|`zeitstempel`
+|datetime, NOT NULL
+|Zeitpunkt der Buchung (UTC).
+
+|`typ`
+|Enum, NOT NULL
+|`HINTERLEGUNG`: bei Ausgabe. `ABZUG`: Kautionseinbehalt. `FREIGABE`: Rückgabe an Mitglied.
+
+|`betragEuro`
+|int, > 0
+|Bewegungsbetrag in ganzen Euro. Immer positiv; das Vorzeichen ergibt sich aus `typ` (BR-022).
+
+|`ausleiheId`
+|String, FK → Ausleihe
+|Die zugehörige Ausleihe.
+
+|`pruefprotokollId`
+|String, FK → Pruefprotokoll, nullable
+|`null` bei HINTERLEGUNG. Referenziert das auslösende Prüfprotokoll bei ABZUG und FREIGABE.
+Entspricht `ausloeserId` im Entity-Modell für diese beiden Typen (BR-022).
+
+|`mitgliedId`
+|String, FK → Mitglied
+|Abgeleitet aus `Ausleihe.mitgliedId`. Denormalisiert für Filterabfragen.
+|===
+
+---
+
+=== Schema: ZustandswechselEintrag
+
+Neues Audit-Konzept: protokolliert jeden Wechsel von `Gegenstand.status`.
+
+[source,json]
+----
+{
+  "id":            "string",
+  "zeitstempel":   "ISO-8601 datetime",
+  "inventarnummer": "string",
+  "vonStatus":     "VERFUEGBAR | AUSGELIEHEN | IN_PRUEFUNG | WARTUNGSFAELLIG | RESERVIERT | AUSGEMUSTERT",
+  "nachStatus":    "VERFUEGBAR | AUSGELIEHEN | IN_PRUEFUNG | WARTUNGSFAELLIG | RESERVIERT | AUSGEMUSTERT",
+  "ausleiheId":    "string | null",
+  "ausloeserId":   "string",
+  "ausloeserRolle": "thekendienst | wart | system"
+}
+----
+
+[cols="2,2,5"]
+|===
+|Feld |Typ / Constraint |Beschreibung
+
+|`id`
+|String, PK
+|Systemgenerierter Bezeichner.
+
+|`zeitstempel`
+|datetime, NOT NULL
+|Zeitpunkt des Zustandswechsels (UTC).
+
+|`inventarnummer`
+|String, FK → Gegenstand
+|Das betroffene Exemplar.
+
+|`vonStatus`
+|GegenstandStatus-Enum, NOT NULL
+|Zustand vor dem Wechsel.
+
+|`nachStatus`
+|GegenstandStatus-Enum, NOT NULL
+|Zustand nach dem Wechsel.
+
+|`ausleiheId`
+|String, FK → Ausleihe, nullable
+|Ausleihe-ID, wenn der Wechsel im Kontext einer laufenden Ausleihe stattfand. `null` z. B.
+beim Anlegen des Gegenstands oder beim Verfall einer Reservierung ohne laufende Ausleihe.
+
+|`ausloeserId`
+|String, NOT NULL
+|Identifikator des auslösenden Vorgangs: Ausleihe-ID, Pruefprotokoll-ID, Reservierungs-ID
+oder `"system"` für automatisch ausgelöste Übergänge (Reservierungsverfall).
+
+|`ausloeserRolle`
+|Enum, NOT NULL
+|`thekendienst`: Ausgabe, Rückgabe, Abholen einer Reservierung. +
+`wart`: Prüfung, Wartungsabschluss. +
+`system`: automatischer Zustandswechsel (Reservierungsverfall).
+|===
+
+---
+
+=== Ereignis-Tabelle
+
+Vollständige Übersicht: Welches Ereignis erzeugt welchen Audit-Eintrag?
+
+[cols="2,3,4"]
+|===
+|Ereignis |Erzeugte Audit-Einträge |Relevante Felder
+
+|*Ausgabe* +
+`POST /ausleihen`
+a|
+1. `KautionsbewegungEintrag` (HINTERLEGUNG)
+2. `ZustandswechselEintrag`
+a|
+• HINTERLEGUNG: `betragEuro` = berechnete Kaution, `pruefprotokollId` = null +
+• Wechsel: VERFUEGBAR oder RESERVIERT → AUSGELIEHEN, `ausloeserRolle` = thekendienst
+
+|*Rückgabe* +
+`POST /ausleihen/{id}/rueckgabe`
+a|
+1. `ZustandswechselEintrag`
+a|
+• Wechsel: AUSGELIEHEN → IN_PRUEFUNG, `ausloeserRolle` = thekendienst +
+• Keine Kautionsbewegung (BR-015, BR-020)
+
+|*Prüfung OK* +
+`leihgut pruefe --ergebnis OK`
+a|
+1. `KautionsbewegungEintrag` (FREIGABE)
+2. `ZustandswechselEintrag`
+a|
+• FREIGABE: volle Kaution, `pruefprotokollId` = ID des neuen Prüfprotokolls +
+• Wechsel: IN_PRUEFUNG → VERFUEGBAR oder RESERVIERT, `ausloeserRolle` = wart
+
+|*Prüfung SCHADEN* +
+`leihgut pruefe --ergebnis SCHADEN`
+a|
+1. `KautionsbewegungEintrag` (ABZUG)
+2. `KautionsbewegungEintrag` (FREIGABE, falls kaution − abzug > 0)
+3. `ZustandswechselEintrag`
+a|
+• ABZUG: `betragEuro` = abzug, `pruefprotokollId` = ID des Prüfprotokolls +
+• FREIGABE: `betragEuro` = kaution − abzug +
+• Wechsel: IN_PRUEFUNG → VERFUEGBAR oder RESERVIERT oder WARTUNGSFAELLIG, `ausloeserRolle` = wart
+
+|*Prüfung VERLOREN* +
+`leihgut pruefe --ergebnis VERLOREN`
+a|
+1. `KautionsbewegungEintrag` (ABZUG)
+2. `ZustandswechselEintrag`
+a|
+• ABZUG: volle Kaution, `pruefprotokollId` = ID des Prüfprotokolls, keine FREIGABE (BR-019) +
+• Wechsel: IN_PRUEFUNG → AUSGEMUSTERT, `ausloeserRolle` = wart
+
+|*Prüfung IRREPARABEL* +
+`leihgut pruefe --ergebnis IRREPARABEL`
+a|
+1. `KautionsbewegungEintrag` (ABZUG, nur falls `--abzug` angegeben)
+2. `KautionsbewegungEintrag` (FREIGABE)
+3. `ZustandswechselEintrag`
+a|
+• ABZUG optional: `betragEuro` = abzug, `pruefprotokollId` = ID des Prüfprotokolls +
+• FREIGABE: `betragEuro` = kaution − abzug bzw. volle Kaution +
+• Wechsel: IN_PRUEFUNG → AUSGEMUSTERT, `ausloeserRolle` = wart
+
+|*Wartung abgeschlossen* +
+`leihgut warte <inventarnummer>`
+a|
+1. `ZustandswechselEintrag`
+a|
+• Wechsel: WARTUNGSFAELLIG → VERFUEGBAR oder RESERVIERT, `ausloeserRolle` = wart +
+• `ausleiheId` = null (kein Ausleihekontext)
+
+|*Reservierung entstanden* +
+(ausgelöst durch Prüfung oder Wartungsabschluss)
+a|
+Wird durch den ZustandswechselEintrag des auslösenden Ereignisses abgedeckt
+(IN_PRUEFUNG→RESERVIERT oder WARTUNGSFAELLIG→RESERVIERT).
+a|
+Kein separater Eintrag; der Wechsel zu RESERVIERT im auslösenden Ereignis ist ausreichend.
+
+|*Reservierung verfallen* +
+(System-Job nach 3 Kalendertagen, BR-031)
+a|
+1. `ZustandswechselEintrag`
+a|
+• Wechsel: RESERVIERT → VERFUEGBAR oder RESERVIERT (nächstes Mitglied) +
+• `ausloeserRolle` = system, `ausloeserId` = Reservierungs-ID +
+• `ausleiheId` = null
+
+|*Reservierung abgeholt* +
+`POST /ausleihen` (Gegenstand im Status RESERVIERT)
+a|
+Wird durch den ZustandswechselEintrag der Ausgabe abgedeckt (RESERVIERT→AUSGELIEHEN).
+a|
+Kein separater Eintrag; `ausloeserRolle` = thekendienst.
+|===
+
+---
+
+=== REST-Endpunkte für Audit-Log-Abfragen
+
+==== GET /ausleihen/{id}/kautionsbewegungen
+
+Liefert alle Kautionsbewegungen einer Ausleihe in chronologischer Reihenfolge.
+
+*Autorisierung*: Rollen `thekendienst`, `wart` (BR-039, BR-041, BR-042). +
+*Header*: `X-Rolle: thekendienst` oder `X-Rolle: wart`
+
+*Validierung*
+
+[cols="1,4,2,2"]
+|===
+|Nr. |Prüfung |HTTP-Status |Fehlercode
+
+|1
+|Header `X-Rolle` ist `thekendienst` oder `wart`.
+|403
+|ROLLE_UNGUELTIG
+
+|2
+|Ausleihe mit `{id}` existiert.
+|404
+|AUSLEIHE_NICHT_GEFUNDEN
+|===
+
+*Response 200 OK*
+
+[source,json]
+----
+[
+  {
+    "id": "KB-001",
+    "zeitstempel": "2026-08-11T10:05:00Z",
+    "typ": "HINTERLEGUNG",
+    "betragEuro": 25,
+    "ausleiheId": "AU-12345",
+    "pruefprotokollId": null,
+    "mitgliedId": "M-042"
+  },
+  {
+    "id": "KB-002",
+    "zeitstempel": "2026-08-14T09:30:00Z",
+    "typ": "ABZUG",
+    "betragEuro": 5,
+    "ausleiheId": "AU-12345",
+    "pruefprotokollId": "PP-0987",
+    "mitgliedId": "M-042"
+  },
+  {
+    "id": "KB-003",
+    "zeitstempel": "2026-08-14T09:30:00Z",
+    "typ": "FREIGABE",
+    "betragEuro": 20,
+    "ausleiheId": "AU-12345",
+    "pruefprotokollId": "PP-0987",
+    "mitgliedId": "M-042"
+  }
+]
+----
+
+Sortierung: `zeitstempel` aufsteigend (ältester Eintrag zuerst).
+Leeres Array `[]`, wenn keine Bewegungen vorliegen.
+
+---
+
+==== GET /gegenstaende/{inventarnummer}/zustandswechsel
+
+Liefert alle Zustandswechsel eines Gegenstands in chronologischer Reihenfolge.
+
+*Autorisierung*: Rollen `thekendienst`, `wart` (BR-039, BR-041, BR-042). +
+*Header*: `X-Rolle: thekendienst` oder `X-Rolle: wart`
+
+*Validierung*
+
+[cols="1,4,2,2"]
+|===
+|Nr. |Prüfung |HTTP-Status |Fehlercode
+
+|1
+|Header `X-Rolle` ist `thekendienst` oder `wart`.
+|403
+|ROLLE_UNGUELTIG
+
+|2
+|Gegenstand mit `{inventarnummer}` existiert.
+|404
+|GEGENSTAND_NICHT_GEFUNDEN
+|===
+
+*Response 200 OK*
+
+[source,json]
+----
+[
+  {
+    "id": "ZW-001",
+    "zeitstempel": "2026-08-11T10:05:00Z",
+    "inventarnummer": "INV-007",
+    "vonStatus": "VERFUEGBAR",
+    "nachStatus": "AUSGELIEHEN",
+    "ausleiheId": "AU-12345",
+    "ausloeserId": "AU-12345",
+    "ausloeserRolle": "thekendienst"
+  }
+]
+----
+
+Sortierung: `zeitstempel` aufsteigend.
+
+---
+
+==== GET /audit
+
+Gesamter, gefilterter Audit-Stream. Nur für den Wart.
+
+*Autorisierung*: Rolle `wart` (BR-039, BR-042). +
+*Header*: `X-Rolle: wart`
+
+*Query-Parameter*
+
+[cols="2,1,5"]
+|===
+|Parameter |Pflicht |Beschreibung
+
+|`typ`
+|nein
+|`KAUTIONSBEWEGUNG` oder `ZUSTANDSWECHSEL`. Fehlt der Parameter: beide Typen.
+
+|`von`
+|nein
+|ISO-8601-Datum (YYYY-MM-DD). Nur Einträge mit `zeitstempel >= von` (Tagesbeginn UTC).
+
+|`bis`
+|nein
+|ISO-8601-Datum (YYYY-MM-DD). Nur Einträge mit `zeitstempel <= bis` (Tagesende UTC).
+
+|`mitgliedId`
+|nein
+|Filtert Kautionsbewegungen nach Mitglied. Hat keinen Effekt auf `ZUSTANDSWECHSEL`-Einträge.
+
+|`inventarnummer`
+|nein
+|Filtert Zustandswechsel nach Gegenstand. Bei `KAUTIONSBEWEGUNG` ohne Wirkung, es sei denn,
+die Ausleihe des Eintrags betrifft diesen Gegenstand.
+
+|`seite`
+|nein
+|Seitennummer (1-basiert, default: 1).
+|===
+
+*Validierung*
+
+[cols="1,4,2,2"]
+|===
+|Nr. |Prüfung |HTTP-Status |Fehlercode
+
+|1
+|Header `X-Rolle` ist `wart`.
+|403
+|ROLLE_UNGUELTIG
+
+|2
+|`von` und `bis` sind, falls angegeben, gültige ISO-8601-Daten und `von <= bis`.
+|400
+|PARAMETER_UNGUELTIG
+|===
+
+*Response 200 OK*
+
+Liefert maximal 100 Einträge pro Seite, sortiert nach `zeitstempel` absteigend.
+Das Antwortformat enthält Paginierungsmetadaten:
+
+[source,json]
+----
+{
+  "seite": 1,
+  "seitengroesse": 100,
+  "gesamt": 243,
+  "eintraege": [
+    { "eintragstyp": "KAUTIONSBEWEGUNG", ... },
+    { "eintragstyp": "ZUSTANDSWECHSEL",  ... }
+  ]
+}
+----
+
+Jeder Eintrag enthält das Feld `"eintragstyp": "KAUTIONSBEWEGUNG" | "ZUSTANDSWECHSEL"` und
+alle Felder des jeweiligen Schemas (siehe Abschnitt 3 und 4).
+
+---
+
+=== Qualitätsziel-Nachweis: Nachvollziehbarkeit
+
+Das PRD formuliert das Qualitätsziel _Nachvollziehbarkeit_ als konkretes Szenario:
+
+____
+Der Wart schließt eine Prüfung mit Abzug ab.
+→ Der Vorgang erzeugt einen Audit-Eintrag mit Zeitstempel, Betrag, Auslöser und Verweis auf das Prüfprotokoll.
+____
+
+Diese Spezifikation erfüllt das Ziel vollständig durch folgende Traceability-Kette:
+
+[cols="1,4"]
+|===
+|Schritt |Nachweis
+
+|1. Auslöser
+|UC-04 „Prüfung durchführen", Ergebnis SCHADEN, Extension 3a (BR-016, BR-017, BR-020, BR-021)
+
+|2. Kautionsbewegung ABZUG wird erzeugt
+|`KautionsbewegungEintrag.typ = ABZUG`, Felder `zeitstempel`, `betragEuro`, `pruefprotokollId` sind
+NOT NULL und referenzieren das Prüfprotokoll direkt (BR-022)
+
+|3. Kautionsbewegung FREIGABE wird erzeugt (sofern Restbetrag > 0)
+|`KautionsbewegungEintrag.typ = FREIGABE`, ebenfalls mit `pruefprotokollId` ≠ null
+
+|4. Abruf
+|`GET /ausleihen/{id}/kautionsbewegungen` → liefert beide Einträge chronologisch mit
+vollständigen Feldern; verifizierbar durch automatisierten Test (UC-04)
+|===
+
+*Invariante*: Die Summe aller `betragEuro`-Werte der Einträge mit `typ = HINTERLEGUNG`
+minus der Summe mit `typ = ABZUG` minus der Summe mit `typ = FREIGABE` einer Ausleihe
+ergibt stets 0 nach Abschluss der Prüfung (Qualitätsziel „Korrektheit der Kaution").
+
+---
+
+=== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# BR-022, Qualitätsziel Nachvollziehbarkeit
+Feature: Audit-Log — Kautionsbewegungen und Zustandswechsel
+
+  Background:
+    Given Gegenstand "INV-007" der Kategorie "Bohrhammer" existiert
+    And Mitglied "M-042" existiert
+    And hinterlegte Kaution für Kategorie "Bohrhammer" beträgt 25 EUR
+
+  # BR-011, BR-022
+  Scenario: Nach Ausgabe entsteht eine Kautionsbewegung HINTERLEGUNG
+    When der Thekendienst Gegenstand "INV-007" an Mitglied "M-042" ausgibt
+    Then existiert eine Kautionsbewegung HINTERLEGUNG über 25 EUR für die neue Ausleihe
+    And der Eintrag hat einen nicht-leeren Zeitstempel
+    And der Eintrag hat pruefprotokollId = null
+
+  # BR-022, Qualitätsziel Nachvollziehbarkeit
+  Scenario: Nach Prüfung mit Abzug entstehen ABZUG und FREIGABE mit pruefprotokollId
+    Given Ausleihe "AU-12345" hat Status OFFEN und Gegenstand "INV-007" hat Status IN_PRUEFUNG
+    And hinterlegte Kaution beträgt 25 EUR
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis SCHADEN --abzug 500
+    Then existiert eine Kautionsbewegung ABZUG über 5 EUR für "AU-12345"
+    And existiert eine Kautionsbewegung FREIGABE über 20 EUR für "AU-12345"
+    And beide Einträge haben dieselbe pruefprotokollId, die nicht null ist
+    And beide Einträge haben einen nicht-leeren Zeitstempel
+    And GET /ausleihen/AU-12345/kautionsbewegungen liefert genau 2 Einträge (HINTERLEGUNG + ABZUG + FREIGABE nein — 3 insgesamt)
+
+  # BR-019, BR-022
+  Scenario: Nach Prüfung VERLOREN entsteht nur ein ABZUG, kein FREIGABE-Eintrag
+    Given Ausleihe "AU-12345" hat Status OFFEN und Gegenstand "INV-007" hat Status IN_PRUEFUNG
+    When der Wart ausführt: leihgut pruefe AU-12345 --ergebnis VERLOREN
+    Then existiert eine Kautionsbewegung ABZUG über 25 EUR für "AU-12345"
+    And existiert keine Kautionsbewegung FREIGABE für "AU-12345"
+    And der ABZUG-Eintrag hat eine nicht-leere pruefprotokollId
+
+  # Audit-Filterung
+  Scenario: GET /audit mit Datumsfilter liefert nur Einträge im Zeitraum
+    Given es existieren Audit-Einträge vom 2026-01-01 und vom 2026-06-01
+    When der Wart GET /audit?von=2026-05-01&bis=2026-07-31 aufruft
+    Then enthält die Antwort nur Einträge mit zeitstempel zwischen 2026-05-01 und 2026-07-31
+    And der Eintrag vom 2026-01-01 ist nicht enthalten
+
+  # BR-039, BR-042 — Zugriffskontrolle
+  Scenario: GET /audit mit Rolle mitglied wird abgelehnt
+    When ein Aufrufer mit X-Rolle: mitglied GET /audit aufruft
+    Then antwortet das System mit HTTP 403
+
+  # Zustandswechsel-Log
+  Scenario: Nach Rückgabe existiert ein ZustandswechselEintrag AUSGELIEHEN→IN_PRUEFUNG
+    Given Ausleihe "AU-12345" hat Status OFFEN und Gegenstand "INV-007" hat Status AUSGELIEHEN
+    When der Thekendienst POST /ausleihen/AU-12345/rueckgabe aufruft
+    Then existiert ein ZustandswechselEintrag mit vonStatus=AUSGELIEHEN und nachStatus=IN_PRUEFUNG
+    And der Eintrag hat ausloeserRolle = thekendienst
+    And GET /gegenstaende/INV-007/zustandswechsel enthält diesen Eintrag
+----

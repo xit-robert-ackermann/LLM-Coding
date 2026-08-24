@@ -1,0 +1,489 @@
+==== Leseendpunkte für Ausleihen und Prüfungen
+
+Die folgenden Endpunkte decken den Lesebedarf im operativen Betrieb ab.
+Sie erzeugen keine Zustandsänderungen.
+Alle Endpunkte liefern Daten, die das System ohnehin persistent hält;
+die Antworten sind Read-Only-Projektionen des Domain-Modells.
+
+---
+
+===== GET /ausleihen
+
+Arbeitsliste des Thekendiensts: aktive und abgeschlossene Ausleihen mit Filtermöglichkeit.
+
+*Autorisierung*: Rolle `thekendienst` (BR-039, BR-041). +
+*Header*: `X-Rolle: thekendienst`
+
+====== Query-Parameter
+
+[cols="2,1,5"]
+|===
+|Parameter |Pflicht |Beschreibung
+
+|`status`
+|nein
+|`OFFEN` oder `ABGESCHLOSSEN`. Default: `OFFEN`.
+
+|`mitgliedId`
+|nein
+|Schränkt die Ergebnisse auf Ausleihen dieses Mitglieds ein.
+
+|`ueberfaellig`
+|nein
+|Boolean (`true` / `false`). Nur überfällige Ausleihen zurückgeben.
+Überfällig: `status = OFFEN` und `rueckgabeFrist < heute` und `Gegenstand.status ≠ IN_PRUEFUNG` (BR-035).
+Wird ignoriert, wenn `status = ABGESCHLOSSEN` gesetzt ist.
+|===
+
+====== Validierung
+
+[cols="1,4,2,2"]
+|===
+|Nr. |Prüfung |HTTP-Status |Fehlercode
+
+|1
+|Header `X-Rolle` ist `thekendienst`.
+|403
+|ROLLE_UNGUELTIG
+
+|2
+|`status`, falls angegeben, ist `OFFEN` oder `ABGESCHLOSSEN`.
+|400
+|PARAMETER_UNGUELTIG
+
+|3
+|`ueberfaellig`, falls angegeben, ist `true` oder `false`.
+|400
+|PARAMETER_UNGUELTIG
+|===
+
+====== Response 200 OK
+
+Array; leer (`[]`), wenn keine Ausleihen die Filterkriterien erfüllen.
+
+[source,json]
+----
+[
+  {
+    "ausleiheId":      "AU-12345",
+    "inventarnummer":  "INV-007",
+    "mitgliedId":      "M-042",
+    "mitgliedName":    "Sabine Müller",
+    "ausgabeDatum":    "2026-08-11",
+    "rueckgabeFrist":  "2026-08-25",
+    "ueberfaellig":    false,
+    "verlaengert":     false,
+    "gegenstandStatus": "AUSGELIEHEN"
+  }
+]
+----
+
+[cols="2,2,5"]
+|===
+|Feld |Typ |Beschreibung
+
+|`ausleiheId`
+|String
+|ID der Ausleihe.
+
+|`inventarnummer`
+|String
+|Inventarnummer des ausgeliehenen Gegenstands.
+
+|`mitgliedId`
+|String
+|ID des Mitglieds.
+
+|`mitgliedName`
+|String
+|Name des Mitglieds (`Mitglied.name`).
+
+|`ausgabeDatum`
+|date (YYYY-MM-DD)
+|Datum der Ausgabe (BR-011).
+
+|`rueckgabeFrist`
+|date (YYYY-MM-DD)
+|Fälligkeitsdatum; bei Verlängerung aktualisiert (BR-012).
+
+|`ueberfaellig`
+|boolean
+|`true`, wenn `status = OFFEN`, `rueckgabeFrist < heute` und `Gegenstand.status ≠ IN_PRUEFUNG` (BR-035).
+
+|`verlaengert`
+|boolean
+|`true`, wenn die Verlängerungsmöglichkeit bereits genutzt wurde (BR-012).
+
+|`gegenstandStatus`
+|GegenstandStatus-Enum
+|Aktueller Zustand des Gegenstands — relevant für den Thekendienst, wenn
+der Gegenstand bereits zurückgegeben, aber noch nicht geprüft ist (`IN_PRUEFUNG`).
+|===
+
+---
+
+===== GET /ausleihen/{id}
+
+Vollständige Detailansicht einer Ausleihe: Stammdaten, Kautionsbewegungen und — nach Abschluss — das Prüfprotokoll.
+
+*Autorisierung*: Rollen `thekendienst`, `wart` (BR-039, BR-041, BR-042). +
+*Header*: `X-Rolle: thekendienst` oder `X-Rolle: wart`
+
+====== Validierung
+
+[cols="1,4,2,2"]
+|===
+|Nr. |Prüfung |HTTP-Status |Fehlercode
+
+|1
+|Header `X-Rolle` ist `thekendienst` oder `wart`.
+|403
+|ROLLE_UNGUELTIG
+
+|2
+|Ausleihe mit `{id}` existiert.
+|404
+|AUSLEIHE_NICHT_GEFUNDEN
+|===
+
+====== Response 200 OK
+
+[source,json]
+----
+{
+  "ausleiheId":        "AU-12345",
+  "inventarnummer":    "INV-007",
+  "kategorieName":     "Bohrhammer",
+  "mitgliedId":        "M-042",
+  "mitgliedName":      "Sabine Müller",
+  "ausgabeDatum":      "2026-08-11",
+  "rueckgabeFrist":    "2026-08-25",
+  "verlaengert":       false,
+  "ueberfaellig":      false,
+  "auffaelligkeiten":  "Kratzer am Gehäuse",
+  "status":            "ABGESCHLOSSEN",
+  "gegenstandStatus":  "VERFUEGBAR",
+  "kautionHinterlegt": 25,
+  "kautionsbewegungen": [
+    {
+      "id":               "KB-001",
+      "zeitstempel":      "2026-08-11T10:05:00Z",
+      "typ":              "HINTERLEGUNG",
+      "betragEuro":       25,
+      "pruefprotokollId": null
+    },
+    {
+      "id":               "KB-002",
+      "zeitstempel":      "2026-08-14T09:30:00Z",
+      "typ":              "ABZUG",
+      "betragEuro":       5,
+      "pruefprotokollId": "PP-0987"
+    },
+    {
+      "id":               "KB-003",
+      "zeitstempel":      "2026-08-14T09:30:00Z",
+      "typ":              "FREIGABE",
+      "betragEuro":       20,
+      "pruefprotokollId": "PP-0987"
+    }
+  ],
+  "pruefprotokoll": {
+    "id":                 "PP-0987",
+    "ergebnis":           "SCHADEN",
+    "kautionsabzugEuro":  5,
+    "notiz":              "Kratzer am Gehäuse, Vorschaden ausgeschlossen",
+    "erstelltAm":         "2026-08-14T09:30:00Z"
+  }
+}
+----
+
+[cols="2,2,5"]
+|===
+|Feld |Typ |Beschreibung
+
+|`ausleiheId` … `gegenstandStatus`
+|wie GET /ausleihen
+|Identisch mit der Listendarstellung.
+
+|`kautionHinterlegt`
+|int (Euro)
+|Betrag der HINTERLEGUNG-Bewegung. Dient dem Thekendienst als schnelle Referenz.
+
+|`kautionsbewegungen`
+|Array
+|Alle Kautionsbewegungen dieser Ausleihe, aufsteigend nach `zeitstempel` sortiert.
+Felder wie in `KautionsbewegungEintrag`, ohne `ausleiheId` und `mitgliedId` (redundant im Kontext).
+
+|`pruefprotokoll`
+|Object oder `null`
+|`null`, solange `status = OFFEN`. Nach Abschluss: vollständige Pruefprotokoll-Daten (BR-016).
+|===
+
+---
+
+===== GET /pruefungen
+
+Arbeitsliste des Warts: alle Ausleihen, deren Gegenstand den Status `IN_PRUEFUNG` trägt.
+
+*Autorisierung*: Rolle `wart` (BR-039, BR-042). +
+*Header*: `X-Rolle: wart`
+
+====== Validierung
+
+[cols="1,4,2,2"]
+|===
+|Nr. |Prüfung |HTTP-Status |Fehlercode
+
+|1
+|Header `X-Rolle` ist `wart`.
+|403
+|ROLLE_UNGUELTIG
+|===
+
+====== Response 200 OK
+
+Array aller Einträge mit `Gegenstand.status = IN_PRUEFUNG`, aufsteigend nach `rueckgabeFrist` sortiert
+(älteste Rückgabe zuerst).
+
+[source,json]
+----
+[
+  {
+    "ausleiheId":       "AU-12345",
+    "inventarnummer":   "INV-007",
+    "kategorieName":    "Bohrhammer",
+    "mitgliedId":       "M-042",
+    "auffaelligkeiten": "Kratzer am Gehäuse",
+    "rueckgabeFrist":   "2026-08-25",
+    "kautionHinterlegt": 25,
+    "fruehereSchaeden": [
+      {
+        "ausleiheId": "AU-09876",
+        "erstelltAm": "2025-11-03T14:00:00Z",
+        "notiz":      "Riss im Bohrfutter, bereits bekannt"
+      }
+    ]
+  }
+]
+----
+
+[cols="2,2,5"]
+|===
+|Feld |Typ |Beschreibung
+
+|`ausleiheId`
+|String
+|ID der laufenden Ausleihe.
+
+|`inventarnummer`
+|String
+|Inventarnummer des zu prüfenden Gegenstands.
+
+|`kategorieName`
+|String
+|Name der Kategorie (`Kategorie.name`).
+
+|`mitgliedId`
+|String
+|ID des Mitglieds, das den Gegenstand zurückgegeben hat.
+
+|`auffaelligkeiten`
+|String oder `null`
+|Freitext, den der Thekendienst bei der Rückgabe erfasst hat (BR-015).
+
+|`rueckgabeFrist`
+|date (YYYY-MM-DD)
+|Ursprüngliche Frist. Dient dem Wart als Kontext für BR-017.
+
+|`kautionHinterlegt`
+|int (Euro)
+|Hinterlegter Kautionsbetrag; Obergrenze für einen möglichen Abzug (BR-021).
+
+|`fruehereSchaeden`
+|Array
+|Alle Prüfprotokolle früherer Ausleihen desselben Gegenstands mit `ergebnis = SCHADEN` oder
+`ergebnis = IRREPARABEL`. Zeigt dem Wart dokumentierte Vorschäden, damit er BR-017 korrekt
+anwenden kann: Schäden, die dort erscheinen, dürfen der laufenden Ausleihe *nicht* erneut
+angelastet werden. Leer (`[]`), wenn keine Vorschäden bekannt sind.
+|===
+
+Das Feld `fruehereSchaeden` ist sicherheitskritisch für BR-017: Erscheint ein Schaden dort,
+ist er einer früheren Ausleihe zugeordnet und darf in der aktuellen Prüfung nicht
+erneut als Abzugsgrund verwendet werden.
+
+---
+
+===== GET /vormerkungen
+
+Übersicht der Warteschlange — relevant für den Thekendienst, der prüft,
+ob eine Verlängerung ausgeschlossen ist (BR-013) oder ob eine Reservierung bevorsteht.
+
+*Autorisierung*: Rolle `thekendienst` (BR-039, BR-041). +
+*Header*: `X-Rolle: thekendienst`
+
+====== Query-Parameter
+
+[cols="2,1,5"]
+|===
+|Parameter |Pflicht |Beschreibung
+
+|`kategorieId`
+|nein
+|Filtert auf eine bestimmte Kategorie.
+
+|`mitgliedId`
+|nein
+|Filtert auf Vormerkungen eines bestimmten Mitglieds.
+|===
+
+====== Validierung
+
+[cols="1,4,2,2"]
+|===
+|Nr. |Prüfung |HTTP-Status |Fehlercode
+
+|1
+|Header `X-Rolle` ist `thekendienst`.
+|403
+|ROLLE_UNGUELTIG
+
+|2
+|`kategorieId`, falls angegeben, referenziert eine existierende Kategorie.
+|404
+|KATEGORIE_NICHT_GEFUNDEN
+|===
+
+====== Response 200 OK
+
+Array aller Vormerkungen mit `status = WARTEND`, aufsteigend nach `eingangszeit` sortiert
+(Position in der Warteschlange entspricht der Sortierreihenfolge, BR-028).
+
+[source,json]
+----
+[
+  {
+    "vormerkungId":  "VM-001",
+    "position":      1,
+    "mitgliedId":    "M-099",
+    "mitgliedName":  "Klaus Berger",
+    "kategorieId":   "KAT-03",
+    "kategorieName": "Bohrhammer",
+    "eingangszeit":  "2026-08-10T08:15:00Z"
+  },
+  {
+    "vormerkungId":  "VM-002",
+    "position":      2,
+    "mitgliedId":    "M-055",
+    "mitgliedName":  "Petra Koch",
+    "kategorieId":   "KAT-03",
+    "kategorieName": "Bohrhammer",
+    "eingangszeit":  "2026-08-11T14:30:00Z"
+  }
+]
+----
+
+Das Feld `position` gibt den Rang in der Warteschlange der jeweiligen Kategorie an (1 = vorne).
+Ist `kategorieId` nicht gesetzt, gilt die Position innerhalb der jeweiligen Kategorie unabhängig.
+
+---
+
+===== Akzeptanzkriterien (Gherkin)
+
+[source,gherkin]
+----
+# UC-10, BR-035
+Feature: UC-10 Leseendpunkte
+
+  Background:
+    Given Gegenstand "INV-007" der Kategorie "Bohrhammer" existiert
+    And Mitglied "M-042" existiert
+    And Mitglied "M-099" existiert
+
+  # BR-035
+  Scenario: GET /ausleihen?ueberfaellig=true zeigt nur überfällige Ausleihen
+    Given Ausleihe "AU-001" für "M-042" hat rueckgabeFrist gestern und Gegenstand "INV-007" hat Status AUSGELIEHEN
+    And Ausleihe "AU-002" für "M-099" hat rueckgabeFrist morgen und Gegenstand status AUSGELIEHEN
+    When der Thekendienst GET /ausleihen?ueberfaellig=true aufruft
+    Then enthält die Antwort genau "AU-001"
+    And enthält die Antwort nicht "AU-002"
+    And jeder Eintrag hat ueberfaellig = true
+
+  # BR-017
+  Scenario: GET /pruefungen zeigt Ausleihe in IN_PRUEFUNG mit fruehereSchaeden
+    Given Gegenstand "INV-007" hat ein abgeschlossenes Prüfprotokoll aus Ausleihe "AU-ALT"
+    And das Protokoll hat ergebnis = SCHADEN und notiz = "Riss im Bohrfutter"
+    And Ausleihe "AU-NEU" für "M-042" hat Gegenstand "INV-007" mit Status IN_PRUEFUNG
+    When der Wart GET /pruefungen aufruft
+    Then enthält die Antwort einen Eintrag für "AU-NEU"
+    And fruehereSchaeden enthält einen Eintrag mit ausleiheId = "AU-ALT"
+    And der Eintrag hat notiz = "Riss im Bohrfutter"
+
+  # BR-039, BR-042 — Zugriffskontrolle
+  Scenario: GET /pruefungen mit Rolle mitglied wird abgelehnt
+    When ein Aufrufer mit X-Rolle: mitglied GET /pruefungen aufruft
+    Then antwortet das System mit HTTP 403
+
+  # BR-016
+  Scenario: GET /ausleihen/{id} bei abgeschlossener Ausleihe enthält Prüfprotokoll
+    Given Ausleihe "AU-12345" hat status = ABGESCHLOSSEN
+    And für "AU-12345" existiert Prüfprotokoll "PP-0987" mit ergebnis = SCHADEN
+    When der Thekendienst GET /ausleihen/AU-12345 aufruft
+    Then hat die Antwort status = ABGESCHLOSSEN
+    And pruefprotokoll ist nicht null
+    And pruefprotokoll.id = "PP-0987"
+    And pruefprotokoll.ergebnis = SCHADEN
+
+  # BR-039, BR-041
+  Scenario: GET /ausleihen mit Rolle mitglied wird abgelehnt
+    When ein Aufrufer mit X-Rolle: mitglied GET /ausleihen aufruft
+    Then antwortet das System mit HTTP 403
+
+  # BR-028
+  Scenario: GET /vormerkungen liefert Warteschlange nach Eingangszeit sortiert
+    Given Mitglied "M-001" hat Vormerkung für "Bohrhammer" mit eingangszeit 2026-08-10T08:00:00Z
+    And Mitglied "M-002" hat Vormerkung für "Bohrhammer" mit eingangszeit 2026-08-10T09:00:00Z
+    When der Thekendienst GET /vormerkungen?kategorieId=KAT-03 aufruft
+    Then ist position 1 das Mitglied "M-001"
+    And ist position 2 das Mitglied "M-002"
+----
+
+---
+
+===== EARS-Anforderungen
+
+[cols="1,1,5"]
+|===
+|ID |EARS-Typ |Anforderung
+
+|REQ-UC10-01
+|When
+|*When* der Thekendienst `GET /ausleihen?ueberfaellig=true` aufruft, *shall* das System
+ausschließlich Ausleihen zurückgeben, für die `status = OFFEN`, `rueckgabeFrist < heute`
+und `Gegenstand.status ≠ IN_PRUEFUNG` gilt. (BR-035)
+
+|REQ-UC10-02
+|When
+|*When* der Wart `GET /pruefungen` aufruft, *shall* das System für jeden Eintrag das Feld
+`fruehereSchaeden` befüllen mit allen Prüfprotokollen früherer Ausleihen desselben Gegenstands,
+deren `ergebnis` SCHADEN oder IRREPARABEL ist, damit der Wart BR-017 korrekt anwenden kann.
+
+|REQ-UC10-03
+|When
+|*When* `GET /ausleihen/{id}` für eine Ausleihe mit `status = ABGESCHLOSSEN` aufgerufen wird,
+*shall* das System das zugehörige Prüfprotokoll vollständig in der Antwort einschließen;
+das Feld `pruefprotokoll` *shall not* null sein. (BR-016)
+
+|REQ-UC10-04
+|If
+|*If* ein Aufrufer einen der Endpunkte `GET /ausleihen`, `GET /ausleihen/{id}`,
+`GET /pruefungen` oder `GET /vormerkungen` ohne gültigen `X-Rolle`-Header oder mit einer
+nicht berechtigten Rolle aufruft, *shall* das System HTTP 403 zurückgeben und keine
+Nutzdaten ausliefern. (BR-039, BR-040, BR-041, BR-042)
+
+|REQ-UC10-05
+|When
+|*When* der Thekendienst `GET /vormerkungen` aufruft, *shall* das System die Ergebnisse
+innerhalb jeder Kategorie aufsteigend nach `eingangszeit` sortieren und das Feld `position`
+als 1-basierten Rang vergeben, sodass Position 1 das Mitglied mit der frühesten
+Eingangszeit ist. (BR-028)
+|===

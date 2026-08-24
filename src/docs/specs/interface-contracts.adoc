@@ -1,0 +1,295 @@
+= Schnittstellenverzeichnis und Fehlerschema
+:toc: left
+:toclevels: 2
+:sectnums:
+:icons: font
+
+== Schnittstellenverzeichnis
+
+Vollständige Übersicht aller REST-Endpunkte und CLI-Kommandos.
+Detailspezifikation jeweils im verlinkten Use Case.
+
+=== REST-API
+
+[cols="2,1,1,3,1"]
+|===
+|Pfad |Methode |Rolle(n) |Zweck |Use Case
+
+|`/kategorien`
+|POST
+|thekendienst
+|Kategorie anlegen
+|UC-08
+
+|`/kategorien`
+|GET
+|mitglied, thekendienst
+|Alle Kategorien auflisten
+|UC-08
+
+|`/gegenstaende`
+|POST
+|thekendienst
+|Gegenstand anlegen
+|UC-08
+
+|`/gegenstaende`
+|GET
+|mitglied, thekendienst
+|Gegenstände auflisten (filter: kategorieId, status)
+|UC-07
+
+|`/gegenstaende/{inventarnummer}`
+|GET
+|mitglied, thekendienst
+|Gegenstand-Detail + Verfügbarkeit
+|UC-07
+
+|`/gegenstaende/{inventarnummer}/zustandswechsel`
+|GET
+|thekendienst, wart
+|Audit: Zustandshistorie eines Gegenstands
+|Audit-Log
+
+|`/mitglieder`
+|POST
+|thekendienst
+|Mitglied anlegen
+|UC-08
+
+|`/mitglieder/{id}`
+|GET
+|thekendienst
+|Mitglied-Detail inkl. Sperrstatus und Einweisungen
+|UC-08
+
+|`/ausleihen`
+|POST
+|thekendienst
+|Gegenstand ausgeben
+|UC-01
+
+|`/ausleihen`
+|GET
+|thekendienst
+|Ausleihen auflisten (filter: status, mitgliedId, ueberfaellig)
+|UC-10
+
+|`/ausleihen/{id}`
+|GET
+|thekendienst, wart
+|Ausleihe-Detail inkl. Kautionsbewegungen
+|UC-10
+
+|`/ausleihen/{id}/verlaengern`
+|POST
+|thekendienst
+|Ausleihe verlängern
+|UC-02
+
+|`/ausleihen/{id}/rueckgabe`
+|POST
+|thekendienst
+|Rückgabe entgegennehmen
+|UC-03
+
+|`/ausleihen/{id}/kautionsbewegungen`
+|GET
+|thekendienst, wart
+|Audit: Kautionsbewegungen einer Ausleihe
+|Audit-Log
+
+|`/pruefungen`
+|GET
+|wart
+|Arbeitsliste: Ausleihen in IN_PRUEFUNG
+|UC-10
+
+|`/vormerkungen`
+|POST
+|mitglied
+|Vormerken für eine Kategorie
+|UC-07
+
+|`/vormerkungen`
+|GET
+|thekendienst
+|Vormerkungen auflisten (filter: kategorieId, mitgliedId)
+|UC-10
+
+|`/vormerkungen/{id}`
+|DELETE
+|mitglied
+|Vormerkung stornieren
+|UC-07
+
+|`/reservierungen/{id}`
+|DELETE
+|mitglied
+|Reservierung stornieren
+|UC-07
+
+|`/audit`
+|GET
+|wart
+|Audit-Log abfragen (filter: typ, von, bis, mitgliedId, inventarnummer)
+|Audit-Log
+|===
+
+=== CLI-Kommandos (Rolle: wart)
+
+[cols="3,3,1"]
+|===
+|Kommando |Zweck |Use Case
+
+|`leihgut pruefe <ausleihe-id> --ergebnis <OK\|SCHADEN\|VERLOREN\|IRREPARABEL> [--abzug <betrag>] [--notiz <text>]`
+|Prüfung durchführen und Ausleihe abschließen
+|UC-04
+
+|`leihgut warte <inventarnummer> [--notiz <text>]`
+|Wartung abschließen, Nutzungszähler zurücksetzen
+|UC-05
+
+|`leihgut einweise <mitglied-id> <kategorie-id> [--notiz <text>]`
+|Einweisung dokumentieren
+|UC-06
+|===
+
+== Fehlerschema
+
+=== Einheitliches JSON-Fehlerformat
+
+Alle REST-Fehlermeldungen folgen diesem Schema:
+
+[source,json]
+----
+{
+  "fehlercode": "GEGENSTAND_NICHT_VERFUEGBAR",
+  "nachricht": "Gegenstand INV-007 ist derzeit ausgeliehen.",
+  "details": {}
+}
+----
+
+[cols="1,3"]
+|===
+|Feld |Beschreibung
+
+|`fehlercode`
+|Maschinenlesbarer Bezeichner in SCREAMING_SNAKE_CASE. Stabil zwischen Versionen.
+
+|`nachricht`
+|Deutschsprachige Klartextmeldung für den Client.
+
+|`details`
+|Optionales Objekt mit kontextspezifischen Zusatzinformationen (z.B. `{ "status": "IN_PRUEFUNG" }`). Kann leer sein.
+|===
+
+=== Vollständiger Fehlerkatalog
+
+[cols="1,1,3"]
+|===
+|HTTP-Status |Fehlercode |Bedeutung
+
+|400
+|EINGABE_UNGUELTIG
+|Pflichtfeld fehlt oder Format ungültig
+
+|403
+|ROLLE_UNGUELTIG
+|Angegebene Rolle hat kein Recht für diese Operation
+
+|404
+|MITGLIED_NICHT_GEFUNDEN
+|Mitglied mit der angegebenen ID existiert nicht
+
+|404
+|GEGENSTAND_NICHT_GEFUNDEN
+|Inventarnummer existiert nicht
+
+|404
+|KATEGORIE_NICHT_GEFUNDEN
+|Kategorie-ID existiert nicht
+
+|404
+|AUSLEIHE_NICHT_GEFUNDEN
+|Ausleihe-ID existiert nicht
+
+|404
+|VORMERKUNG_NICHT_GEFUNDEN
+|Vormerkung-ID existiert nicht
+
+|404
+|RESERVIERUNG_NICHT_GEFUNDEN
+|Reservierung-ID existiert nicht
+
+|409
+|GEGENSTAND_NICHT_VERFUEGBAR
+|Gegenstand ist nicht verfügbar oder reserviert (BR-007)
+
+|409
+|GEGENSTAND_WARTUNGSFAELLIG
+|Gegenstand ist wartungsfällig (BR-026)
+
+|409
+|MITGLIED_GESPERRT
+|Mitglied hat mindestens eine überfällige Ausleihe (BR-009, BR-034)
+
+|409
+|MAX_AUSLEIHEN_ERREICHT
+|Mitglied führt bereits 3 offene Ausleihen (BR-008)
+
+|409
+|EINWEISUNG_FEHLT
+|Einweisungspflichtiges Gerät, Einweisung nicht dokumentiert (BR-010)
+
+|409
+|BEREITS_VERLAENGERT
+|Ausleihe wurde bereits einmal verlängert (BR-012)
+
+|409
+|AUSLEIHE_UEBERFAELLIG
+|Verlängerung nicht möglich: Ausleihe überfällig (BR-013)
+
+|409
+|VORMERKUNG_VORHANDEN
+|Verlängerung nicht möglich: offene Vormerkung für diese Kategorie (BR-013)
+
+|409
+|AUSLEIHE_NICHT_OFFEN
+|Operation erfordert Status OFFEN
+
+|409
+|GEGENSTAND_NICHT_IN_PRUEFUNG
+|Prüfung erfordert Status IN_PRUEFUNG
+
+|409
+|GEGENSTAND_NICHT_WARTUNGSFAELLIG
+|Wartungsabschluss erfordert Status WARTUNGSFAELLIG
+
+|409
+|ABZUG_UEBERSTEIGT_KAUTION
+|Kautionsabzug > hinterlegte Kaution (BR-021)
+
+|409
+|BEREITS_VORGEMERKT
+|Mitglied hat bereits eine aktive Vormerkung für diese Kategorie
+
+|409
+|DUPLIKAT
+|Ressource mit diesem Schlüssel existiert bereits (Inventarnummer, Mitglieds-ID, Kategoriename)
+|===
+
+=== CLI-Fehlerschema
+
+CLI-Kommandos schreiben Fehlermeldungen auf `stderr` und beenden mit Exit-Code `1`.
+Erfolgreiche Ausgaben gehen auf `stdout`, Exit-Code `0`.
+
+Format der stderr-Meldung:
+----
+FEHLER [FEHLERCODE]: Deutschsprachige Erklärung.
+----
+
+Beispiel:
+----
+FEHLER [ABZUG_UEBERSTEIGT_KAUTION]: Abzug (45 EUR) übersteigt hinterlegte Kaution (25 EUR).
+----

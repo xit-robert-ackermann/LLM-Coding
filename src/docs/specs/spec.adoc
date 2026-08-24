@@ -53,3 +53,19 @@ include::uc-07-vormerkung.adoc[leveloffset=+2]
 === UC-08 Stammdaten verwalten
 
 include::uc-08-stammdaten.adoc[leveloffset=+2]
+
+=== UC-09 Systemgesteuerte Prozesse
+
+include::uc-09-systemablaeufe.adoc[leveloffset=+2]
+
+=== UC-10 Leseendpunkte für Ausleihen und Prüfungen
+
+include::uc-10-leseendpunkte.adoc[leveloffset=+2]
+
+== Audit-Log
+
+include::audit-log.adoc[leveloffset=+1]
+
+== Schnittstellenverzeichnis und Fehlerschema
+
+include::interface-contracts.adoc[leveloffset=+1]

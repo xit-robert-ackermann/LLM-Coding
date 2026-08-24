@@ -1,0 +1,341 @@
+==== Systemablauf A: Reservierungsverfall
+
+Dieser Ablauf hat keinen menschlichen Primary Actor.
+Er ist systeminternes Verhalten, das bei jedem eingehenden Request automatisch ausgeführt wird, bevor der eigentliche Vorgang verarbeitet wird.
+
+[cols="1,4"]
+|===
+|Feld |Inhalt
+
+|Use-Case-ID
+|UC-09-A
+
+|Auslöser
+|Ein eingehender Request, der den Status eines Gegenstands oder einer Reservierung lesen oder verändern würde: +
+`POST /ausleihen`, `GET /gegenstaende`, `POST /vormerkungen`
+
+|Vorbedingung
+|Es existiert mindestens eine Reservierung mit `status = AKTIV` und `verfaelltAm < heute`
+
+|Nachbedingung (Erfolg)
+|Keine Reservierung mit `status = AKTIV` und `verfaelltAm < heute` ist mehr im System vorhanden
+
+|Nachbedingung (Abbruch)
+|Kein Zustandswechsel. Der auslösende Request wird mit einem Fehler beantwortet.
+
+|Geschäftsregeln
+|BR-031, BR-033
+|===
+
+===== Hauptszenario
+
+. Das System bestimmt die von dem Request betroffene Kategorie.
+. Das System lädt alle Reservierungen der Kategorie mit `status = AKTIV` und `verfaelltAm < heute` (Datumsquelle, siehe <<datumsquelle>>).
+. Für jede verfallene Reservierung:
+  .. Das System setzt `Reservierung.status → VERFALLEN`.
+  .. Das System sucht die nächste offene Vormerkung der Kategorie in der Warteschlange (FIFO nach Eingangszeit, BR-028).
+  .. Ist eine Vormerkung vorhanden und das vorgemerkende Mitglied nicht gesperrt: +
+     Das System erstellt eine neue Reservierung für dieses Mitglied (`verfaelltAm = heute + 3 Kalendertage`) und setzt `Gegenstand.status → RESERVIERT` (BR-031).
+  .. Sind keine weiteren Vormerkungen vorhanden: +
+     Das System setzt `Gegenstand.status → VERFUEGBAR`.
+. Das System führt den auslösenden Request aus.
+
+===== Erweiterungen
+
+E1 — Nächster Vormerker ist gesperrt (BR-033)::
+In Schritt 3c: Das vorgemerkende Mitglied ist gesperrt.
+Das System überspringt diese Vormerkung.
+Der Platz des Mitglieds in der Warteschlange bleibt unverändert.
+Das System prüft den nächsten Eintrag in der Warteschlange — Schleife zurück zu Schritt 3b.
+
+E2 — Alle Vormerker sind gesperrt::
+Alle verbleibenden Mitglieder der Warteschlange sind gesperrt.
+Das System setzt `Gegenstand.status → VERFUEGBAR`.
+Die Warteschlange bleibt unverändert bestehen.
+
+E3 — Mehrere verfallene Reservierungen::
+Das System verarbeitet jede verfallene Reservierung einzeln und vollständig, bevor es die nächste bearbeitet.
+Die Reihenfolge innerhalb eines Requests ist stabil (z. B. nach `verfaelltAm` aufsteigend).
+
+---
+
+==== Systemablauf B: Überfälligkeitserkennung und Sperre
+
+Die Sperre ist kein persistierter Zustand.
+Sie ist ein berechnetes Feld, das bei jedem Zugriff auf Mitglied-Daten neu ermittelt wird.
+Es gibt kein `gesperrt`-Attribut in der Datenbank und keinen Sperr- oder Entsperr-Vorgang.
+
+[cols="1,4"]
+|===
+|Feld |Inhalt
+
+|Use-Case-ID
+|UC-09-B
+
+|Auslöser
+|Jede Operation, die den Sperrstatus eines Mitglieds benötigt: Ausgabe (UC-02), Verlängerung (UC-04), Reservierungsübergabe (UC-09-A, E1), `GET /mitglieder/{id}`
+
+|Berechnung
+|`gesperrt = ∃ Ausleihe: ausleihe.mitgliedId = mitgliedId AND ausleihe.status = OFFEN AND ausleihe.rueckgabeFrist < heute`
+
+|Datumsquelle
+|Austauschbare Datumsquelle (<<datumsquelle>>). Niemals `Date.now()` oder äquivalent direkt aufrufen.
+
+|Rückgabe in GET /mitglieder/{id}
+|Das Feld `gesperrt` ist ein berechnetes Boolean; es wird nicht gespeichert.
+
+|Sperre endet
+|Automatisch, sobald alle Ausleihen des Mitglieds mit `status = OFFEN AND rueckgabeFrist < heute` abgeschlossen sind (BR-036). Es ist keine manuelle Entsperrung nötig.
+
+|Geschäftsregeln
+|BR-034, BR-035, BR-036
+|===
+
+---
+
+[[aktivitaet-reservierungsverfall]]
+==== Aktivitätsdiagramm: Reservierungsverfall
+
+[plantuml]
+----
+@startuml
+skinparam defaultFontName monospaced
+skinparam ActivityBorderColor #444444
+skinparam ActivityBackgroundColor #FAFAFA
+
+start
+
+:Request eingehend\n(POST /ausleihen, GET /gegenstaende,\nPOST /vormerkungen);
+
+:Betroffene Kategorie bestimmen;
+
+:Aktive Reservierungen der Kategorie laden\ndie verfaelltAm < heute haben;
+
+if (Verfallene Reservierungen vorhanden?) then (ja)
+
+  while (Weitere verfallene Reservierung?) is (ja)
+
+    :Reservierung.status → VERFALLEN;
+
+    :Nächste Vormerkung der Kategorie\naus Warteschlange lesen (FIFO);
+
+    if (Vormerkung vorhanden?) then (nein)
+      :Gegenstand.status → VERFUEGBAR;
+    else (ja)
+      while (Mitglied der Vormerkung gesperrt?) is (ja)
+        note right
+          BR-033: Platz
+          bleibt erhalten
+        end note
+        :Nächste Vormerkung lesen;
+        if (Weitere Vormerkung vorhanden?) then (nein)
+          :Gegenstand.status → VERFUEGBAR;
+          break
+        endif
+      endwhile
+      if (Nicht-gesperrtes Mitglied gefunden?) then (ja)
+        :Neue Reservierung erstellen\n(verfaelltAm = heute + 3 Tage);
+        :Gegenstand.status → RESERVIERT;
+      endif
+    endif
+
+  endwhile (nein)
+
+else (nein)
+endif
+
+:Auslösenden Request ausführen;
+
+stop
+@enduml
+----
+
+---
+
+[[aktivitaet-ueberfaelligkeit]]
+==== Aktivitätsdiagramm: Überfälligkeitsprüfung
+
+[plantuml]
+----
+@startuml
+skinparam defaultFontName monospaced
+skinparam ActivityBorderColor #444444
+skinparam ActivityBackgroundColor #FAFAFA
+
+start
+
+:Mitglied-ID empfangen;
+
+:Alle Ausleihen des Mitglieds laden\nmit status = OFFEN;
+
+if (Mindestens eine Ausleihe vorhanden\nmit rueckgabeFrist < heute?) then (ja)
+  note right
+    BR-034, BR-035
+    Datumsquelle verwenden —
+    niemals Date.now() direkt
+  end note
+  :gesperrt = true;
+else (nein)
+  :gesperrt = false;
+endif
+
+:Ergebnis zurückgeben\n(berechnetes Feld, nicht persistiert);
+
+stop
+@enduml
+----
+
+---
+
+[[datumsquelle]]
+==== Datumsquelle-Spezifikation
+
+Das System liest das aktuelle Datum ausnahmslos über eine austauschbare Datumsquelle.
+Diese Anforderung gilt für alle Fristenberechnungen (Rückgabefrist, Reservierungsverfall) und alle Überfälligkeitsprüfungen.
+
+[cols="1,2,2"]
+|===
+|Umgebung |Implementierung |Rückgabewert
+
+|Produktion
+|`SystemDateSource`
+|`LocalDate.now()` — das aktuelle Systemdatum der Laufzeitumgebung
+
+|Tests
+|`FixedDateSource`
+|Konfigurierbares Datum, das im Test gesetzt wird (z. B. `FixedDateSource("2025-03-15")`)
+|===
+
+Verbotene Direktaufrufe::
+`Date.now()`, `new Date()`, `LocalDate.now()` außerhalb von `SystemDateSource`, `datetime.date.today()` und jedes sprachspezifische Äquivalent.
+Der Review-Prozess prüft diesen Punkt explizit.
+
+Injektionsregel::
+Die Datumsquelle wird als Abhängigkeit injiziert — niemals aus einem globalen Kontext gelesen.
+Jede Komponente, die ein Datum benötigt, erhält die Quelle über ihren Konstruktor oder ihre Fabrik.
+
+Konsequenz für Testbarkeit::
+Ein Test kann „heute" auf ein beliebiges Datum setzen.
+Damit lassen sich Verfallsszenarien, Überfälligkeitsprüfungen und Fristen ohne Wartezeit reproduzierbar prüfen.
+
+---
+
+==== Akzeptanzkriterien
+
+===== Szenario UC-09-A-1: Reservierung verfallen, keine Nachfolger
+
+[source,gherkin]
+----
+# BR-031
+Gegeben ein Gegenstand G der Kategorie K mit status = RESERVIERT
+  Und eine Reservierung für Mitglied M mit verfaelltAm = heute - 1 Tag
+  Und keine offene Vormerkung für Kategorie K
+Wenn eine GET /gegenstaende Anfrage eingeht
+Dann hat G den Status VERFUEGBAR
+  Und die Reservierung hat den Status VERFALLEN
+----
+
+===== Szenario UC-09-A-2: Reservierung verfallen, Nachfolger vorhanden
+
+[source,gherkin]
+----
+# BR-031
+Gegeben ein Gegenstand G der Kategorie K mit status = RESERVIERT
+  Und eine Reservierung für Mitglied M1 mit verfaelltAm = heute - 1 Tag
+  Und eine offene Vormerkung von Mitglied M2 für Kategorie K (nicht gesperrt)
+Wenn eine POST /ausleihen Anfrage eingeht
+Dann hat G den Status RESERVIERT
+  Und es existiert eine neue Reservierung für M2
+    mit verfaelltAm = heute + 3 Tage
+  Und die alte Reservierung hat den Status VERFALLEN
+----
+
+===== Szenario UC-09-A-3: Reservierung verfallen, erster Vormerker gesperrt
+
+[source,gherkin]
+----
+# BR-031, BR-033
+Gegeben ein Gegenstand G der Kategorie K mit status = RESERVIERT
+  Und eine Reservierung für Mitglied M1 mit verfaelltAm = heute - 1 Tag
+  Und eine offene Vormerkung von Mitglied M2 für Kategorie K
+    (M2 ist gesperrt wegen überfälliger Ausleihe)
+  Und eine offene Vormerkung von Mitglied M3 für Kategorie K (nicht gesperrt)
+  Und M2 steht vor M3 in der Warteschlange
+Wenn eine POST /vormerkungen Anfrage eingeht
+Dann hat G den Status RESERVIERT
+  Und es existiert eine neue Reservierung für M3
+  Und M2 behält seinen Platz in der Warteschlange
+  Und die alte Reservierung hat den Status VERFALLEN
+----
+
+===== Szenario UC-09-B-1: Mitglied gesperrt bei überfälliger Ausleihe
+
+[source,gherkin]
+----
+# BR-034, BR-035
+Gegeben ein Mitglied M mit einer offenen Ausleihe
+  Und die Rückgabefrist der Ausleihe liegt einen Tag vor heute
+Wenn GET /mitglieder/{M.id} aufgerufen wird
+Dann enthält die Antwort "gesperrt": true
+----
+
+===== Szenario UC-09-B-2: Mitglied entsperrt nach Abschluss aller überfälligen Ausleihen
+
+[source,gherkin]
+----
+# BR-036
+Gegeben ein Mitglied M, dessen einzige überfällige Ausleihe A gerade durch ein Prüfprotokoll abgeschlossen wurde
+Wenn GET /mitglieder/{M.id} aufgerufen wird
+Dann enthält die Antwort "gesperrt": false
+----
+
+===== Szenario UC-09-C-1: Testbarkeit über injizierte Datumsquelle
+
+[source,gherkin]
+----
+# BR-031
+Gegeben eine Datumsquelle, die "morgen" liefert
+  Und ein Gegenstand G der Kategorie K mit status = RESERVIERT
+  Und eine Reservierung für Mitglied M mit verfaelltAm = morgen
+    (d. h. verfaelltAm = heute aus Sicht der injizierten Quelle)
+Wenn eine GET /gegenstaende Anfrage eingeht
+Dann hat G den Status VERFUEGBAR
+  Und die Reservierung hat den Status VERFALLEN
+----
+
+---
+
+==== Anforderungen (EARS-Syntax)
+
+[cols="1,1,4"]
+|===
+|ID |Typ |Anforderung
+
+|REQ-09-01
+|When
+|Wenn das System einen Request verarbeitet, der `POST /ausleihen`, `GET /gegenstaende` oder `POST /vormerkungen` betrifft, soll es vor der eigentlichen Verarbeitung alle aktiven Reservierungen der betroffenen Kategorie auf Verfall prüfen. (BR-031)
+
+|REQ-09-02
+|When
+|Wenn eine Reservierung mit `status = AKTIV` und `verfaelltAm < heute` gefunden wird, soll das System ihren Status auf VERFALLEN setzen und die Warteschlange der Kategorie für eine Nachfolge-Reservierung auswerten. (BR-031)
+
+|REQ-09-03
+|When
+|Wenn nach dem Verfall einer Reservierung das nächste Mitglied der Warteschlange gesperrt ist, soll das System dieses Mitglied überspringen, seinen Platz in der Warteschlange erhalten und das übernächste nicht-gesperrte Mitglied prüfen. (BR-033)
+
+|REQ-09-04
+|While
+|Solange ein Mitglied mindestens eine Ausleihe mit `status = OFFEN` und `rueckgabeFrist < heute` führt, soll jede Berechnung des Felds `gesperrt` den Wert `true` liefern. (BR-034, BR-035)
+
+|REQ-09-05
+|When
+|Wenn für ein Mitglied keine Ausleihe mehr mit `status = OFFEN` und `rueckgabeFrist < heute` existiert, soll das System `gesperrt = false` liefern, ohne dass ein expliziter Entsperr-Vorgang nötig ist. (BR-036)
+
+|REQ-09-06
+|Where
+|Das System soll das aktuelle Datum ausschließlich über eine injizierbare `DateSource`-Abhängigkeit lesen; direkte Aufrufe von Systemzeit-APIs (z. B. `LocalDate.now()`, `Date.now()`) außerhalb dieser Implementierung sind nicht erlaubt.
+
+|REQ-09-07
+|If
+|Wenn nach vollständiger Auswertung der Warteschlange kein nicht-gesperrtes Mitglied mehr vorhanden ist, soll das System den Gegenstand auf den Status VERFUEGBAR setzen. (BR-031, BR-033)
+|===
