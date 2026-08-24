@@ -2,7 +2,7 @@
 
 :issue-id: 0014
 :type: Story
-:status: open
+:status: closed
 :priority: Must
 :refs: UC-01, BR-007, BR-008, BR-009, BR-010, BR-011, BR-020, BR-022
 :epic: 0013
