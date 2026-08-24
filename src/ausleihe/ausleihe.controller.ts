@@ -1,15 +1,20 @@
 import { Controller, Post, Get, Body, Param, Query, HttpCode, HttpStatus } from '@nestjs/common';
 import { AusleiheService } from './ausleihe.service';
+import { VormerkungService } from '../vormerkung/vormerkung.service';
 import { RequireRole } from '../auth/require-role.decorator';
 
 @Controller('ausleihen')
 export class AusleiheController {
-  constructor(private readonly service: AusleiheService) {}
+  constructor(
+    private readonly service: AusleiheService,
+    private readonly vormerkungService: VormerkungService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RequireRole('thekendienst')
   create(@Body() body: any) {
+    this.vormerkungService.verfalleneReservierungenBereinigen();
     return this.service.ausgeben(body);
   }
 
